@@ -1,13 +1,24 @@
 const express = require('express');
-const router = express.Router()
+const { verifyOTP } = require('../service/otp');
+const { verifyEmail } = require('../middleware/email-verifier');
+const { logTime } = require('../middleware/logger');
 
-const timeLog = (req, res, next) => {
-  console.log('Time: ', Date.now());
-  next();
-};
+const router = express.Router();
 
-router.post('/verify', timeLog, (req, res) => {
-  res.send('Verifying OTP...');
-});
+const handler = async (req, res) => {
+  const { email, otp } = req.body;
+  try {
+    const isValidOTP = await verifyOTP(email, otp);
+    if (isValidOTP) {
+      res.status(200).send(`OTP verified successfully for ${email}`);
+    } else {
+      res.status(400).send(`OTP is not valid for ${email}`)
+    }
+  } catch(error) {
+    res.status(500).send("An error has occured. Please try again.");
+  }
+}
+
+router.post('/verify', logTime, verifyEmail, handler);
 
 module.exports = router;
