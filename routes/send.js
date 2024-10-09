@@ -1,5 +1,5 @@
 const express = require('express');
-const { sendEmail } = require('../service/sendgrid');
+const { sendEmail } = require('../service/email');
 const { generateOTP } = require('../service/otp');
 const { verifyEmail } = require('../middleware/email-verifier');
 const { logTime } = require('../middleware/logger');
