@@ -19,6 +19,6 @@ app.use(bodyParser.json());
 app.use('/otp', sendRouter);
 app.use('/otp', verifyRouter);
 
-app.listen(port, () => {
+app.listen(process.env.SERVER_PORT || port, () => {
   console.log(`Listening on port ${port}`);
 });
