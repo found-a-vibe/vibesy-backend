@@ -1,9 +1,10 @@
 'use strict'
-const config = require('dotenv').config()
-
-if (config.error) {
-  throw config.error;
-};
+if (process.env.NODE_ENV !== 'production') {
+  const config = require('dotenv').config()
+  if (config.error) {
+    throw config.error;
+  };
+}
 
 const express = require('express');
 const app = express();
