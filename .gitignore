@@ -5,6 +5,9 @@ node_modules/
 # Environment variables
 .env
 
+# Secrets
+.firebase/
+
 # IDE/Editor specific
 .vscode/
 
