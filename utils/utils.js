@@ -6,7 +6,7 @@ async function generateMessage(email, otp) {
   const updatedHtmlContent = await replacePlaceholders(htmlContent, otp);
   return {
       to: email,
-      from: `Found A Vibe ${process.env.SENDGRID_VERIFIED_SENDERS_EMAIL}`,
+      from: `Found A Vibe <${process.env.SENDGRID_VERIFIED_SENDERS_EMAIL}>`,
       subject: 'Found A Vibe OTP Verification Code',
       html: updatedHtmlContent
     }
