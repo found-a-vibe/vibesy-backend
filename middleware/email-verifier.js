@@ -10,6 +10,7 @@ const verifyEmail = async (req, res, next) => {
   try {
     let userRecord = await admin.auth().getUserByEmail(email);
     console.log(`Successfully fetched user with uid: ${userRecord.uid}`);
+    req.uid = userRecord.uid
   } catch(error) {
     console.log('Error fetching user data:', error);
     if (error.code === "auth/user-not-found") {

@@ -10,7 +10,7 @@ const handler = async (req, res) => {
   try {
     const isValidOTP = await verifyOTP(email, otp);
     if (isValidOTP) {
-      res.status(200).json({status: "OK", description: `One-time passcode successfully verified for ${email}`});
+      res.status(200).json({status: "OK", description: "One-time passcode successfully verified", data: { email, uid: req.uid }});
     } else {
       res.status(400).json({status: "Bad Request", description: `One-time passcode is not valid or has expired for ${email}`});
     }
