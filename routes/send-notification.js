@@ -6,14 +6,14 @@ const { getMessaging } = require('firebase-admin/messaging');
 const router = express.Router();
 
 const handler = async (req, res) => {
-    const { title, body, toUserId } = req.body;
+    const { title, body, toUserId, fromUserId } = req.body;
 
     try {
         // Fetch the recipient's FCM token from Firestore
         const receiver = await admin.firestore().collection("users").doc(toUserId).collection("tokens").doc("fcm").get();
         const fcmToken = receiver.data().fcmToken;
 
-        const sender = await admin.firestore().collection("users").doc(toUserId).collection("profile").doc("metadata").get();
+        const sender = await admin.firestore().collection("users").doc(fromUserId).collection("profile").doc("metadata").get();
         const username = sender.data().fullName
 
         if (!fcmToken) {
