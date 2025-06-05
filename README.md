@@ -1,6 +1,6 @@
-# One-Time Password Service
+# Vibesy Backend
 
-This is an OTP (One-Time Password) service built using Express.js. The service provides two main routes: `send` and `verify`, allowing users to send OTPs via email and verify them for authentication purposes. It uses the following technologies:
+This is the Vibesy backend service built using Express.js. The service provides two main routes: `send` and `verify`, allowing users to send OTPs via email and verify them for authentication purposes. It uses the following technologies:
 
 - **SendGrid**: For sending OTPs via email.
 - **Firebase Admin SDK**: For secure user management.
