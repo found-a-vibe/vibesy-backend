@@ -14,7 +14,7 @@ const verifyEmail = async (req, res, next) => {
   } catch(error) {
     console.log('Error fetching user data:', error);
     if (error.code === "auth/user-not-found") {
-      return res.status(404).json({status: "Not Found", description: "Email is not registered in Firebase."});
+      return res.status(404).json({status: "Not Found", description: "Email is not registered with our system."});
     }
     return res.status(500).json({status: "System Error", description: "Unable to verify email."});
   }

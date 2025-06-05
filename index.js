@@ -19,7 +19,9 @@ const sendRouter = require('./routes/send-otp');
 const verifyRouter = require('./routes/verify-otp');
 const resetPasswordRouter = require('./routes/reset-password');
 const sendNotificationRouter = require('./routes/send-notification');
+const eventsRouter = require('./routes/fetch-events');
 
+const actualPort = process.env.SERVER_PORT || port;
 
 app.use(bodyParser.json());
 
@@ -30,6 +32,8 @@ app.use('/password', resetPasswordRouter);
 
 app.use('/notifications', sendNotificationRouter);
 
-app.listen(process.env.SERVER_PORT || port, () => {
-  console.log(`Listening on port ${port}`);
+app.use('/events', eventsRouter);
+
+app.listen(actualPort, '0.0.0.0', () => {
+  console.log(`Listening on port ${actualPort}`);
 });
