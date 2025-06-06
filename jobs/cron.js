@@ -2,7 +2,7 @@ const cron = require("node-cron");
 const moment = require("moment-timezone");
 const { fetchGoogleEvents, saveEventsBatch } = require("../service/events");
 
-cron.schedule("30 23 * * *", async () => {
+cron.schedule("35 23 * * *", async () => {
   const now = moment().tz("America/New_York");
 
   if (now.hour() === 0) {

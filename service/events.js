@@ -42,7 +42,7 @@ async function uploadImageFromUrl(imageUrl, eventId) {
   }
 }
 
-export async function fetchGoogleEvents() {
+async function fetchGoogleEvents() {
   const url = `https://serpapi.com/search.json?engine=google_events&q=Events%2Bin%2BAtlanta&hl=en&gl=us&htichips=date%3Amonth&api_key=${process.env.SERPAPI_KEY}`;
 
   try {
@@ -60,7 +60,7 @@ export async function fetchGoogleEvents() {
   }
 }
 
-export async function saveEventsBatch(googleEvents = []) {
+async function saveEventsBatch(googleEvents = []) {
   if (!googleEvents.length) {
     return console.warn("⚠️ No events to save.");
   }
@@ -112,3 +112,8 @@ export async function saveEventsBatch(googleEvents = []) {
     console.error("Error saving events batch:", error);
   }
 }
+
+module.exports = {
+  fetchGoogleEvents,
+  saveEventsBatch,
+};
