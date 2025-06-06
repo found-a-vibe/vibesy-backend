@@ -2,10 +2,10 @@ const cron = require("node-cron");
 const moment = require("moment-timezone");
 const { fetchGoogleEvents, saveEventsBatch } = require("../service/events");
 
-cron.schedule("55 23 * * *", async () => {
+cron.schedule("0 * * * *", async () => {
   const now = moment().tz("America/New_York");
 
-  if (now.hour() === 23 && now.minute() === 55) {
+  if (now.hour() === 0) {
     console.log(`Running Vibesy event sync @ ${now.format()}`);
 
     const events = await fetchGoogleEvents();
