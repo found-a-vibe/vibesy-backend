@@ -6,6 +6,8 @@ if (process.env.NODE_ENV !== 'production') {
   };
 }
 
+require("./jobs/cron"); // ← this sets up your cron job
+
 const express = require('express');
 
 const app = express();
@@ -19,7 +21,6 @@ const sendRouter = require('./routes/send-otp');
 const verifyRouter = require('./routes/verify-otp');
 const resetPasswordRouter = require('./routes/reset-password');
 const sendNotificationRouter = require('./routes/send-notification');
-const eventsRouter = require('./routes/fetch-events');
 
 const actualPort = process.env.SERVER_PORT || port;
 
@@ -31,8 +32,6 @@ app.use('/otp', verifyRouter);
 app.use('/password', resetPasswordRouter);
 
 app.use('/notifications', sendNotificationRouter);
-
-app.use('/events', eventsRouter);
 
 app.listen(actualPort, '0.0.0.0', () => {
   console.log(`Listening on port ${actualPort}`);
