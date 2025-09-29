@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { 
+  stripe,
   calculatePlatformFee,
   createPaymentIntentWithDestination,
   getOrCreateCustomer,

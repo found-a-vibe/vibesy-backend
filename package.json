@@ -10,6 +10,7 @@
     "start:prod": "NODE_ENV=production node dist/index.js",
     "clean": "rm -rf dist",
     "build:clean": "npm run clean && npm run build",
+    "db:reset": "node scripts/reset-database.js",
     "lint": "echo \"Add ESLint configuration\"",
     "test": "echo \"Add test configuration\""
   },

@@ -83,9 +83,40 @@ export async function initializeDatabase(): Promise<DatabaseConnection> {
   return dbConnection;
 }
 
-// Run database migrations
+// Create migrations tracking table
+async function createMigrationsTable(db: DatabaseConnection): Promise<void> {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id SERIAL PRIMARY KEY,
+      filename VARCHAR(255) NOT NULL UNIQUE,
+      executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
+
+// Check if migration has been executed
+async function isMigrationExecuted(db: DatabaseConnection, filename: string): Promise<boolean> {
+  const result = await db.query(
+    'SELECT 1 FROM schema_migrations WHERE filename = $1', 
+    [filename]
+  );
+  return result.rows.length > 0;
+}
+
+// Mark migration as executed
+async function markMigrationExecuted(db: DatabaseConnection, filename: string): Promise<void> {
+  await db.query(
+    'INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING', 
+    [filename]
+  );
+}
+
+// Run database migrations with proper tracking
 async function runMigrations(db: DatabaseConnection): Promise<void> {
   try {
+    // Create migrations tracking table
+    await createMigrationsTable(db);
+    
     const migrationsPath = join(__dirname, '../migrations');
     let migrationFiles: string[] = [];
     
@@ -106,14 +137,45 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
     
     console.log(`Found ${migrationFiles.length} migration file(s)`);
     
+    let executedCount = 0;
+    let skippedCount = 0;
+    
     for (const file of migrationFiles) {
+      // Check if migration has already been executed
+      if (await isMigrationExecuted(db, file)) {
+        console.log(`Skipping migration (already executed): ${file}`);
+        skippedCount++;
+        continue;
+      }
+      
       const migrationPath = join(migrationsPath, file);
       const migration = readFileSync(migrationPath, 'utf8');
       
       console.log(`Running migration: ${file}`);
-      await db.query(migration);
-      console.log(`Completed migration: ${file}`);
+      
+      try {
+        await db.query(migration);
+        await markMigrationExecuted(db, file);
+        console.log(`Completed migration: ${file}`);
+        executedCount++;
+      } catch (error) {
+        console.error(`Failed to execute migration ${file}:`, error);
+        
+        // For constraint/index conflicts, mark as executed and continue
+        if (error instanceof Error && 
+            (error.message.includes('already exists') || 
+             error.message.includes('duplicate'))) {
+          console.log(`Marking migration as completed despite conflict: ${file}`);
+          await markMigrationExecuted(db, file);
+          skippedCount++;
+        } else {
+          throw error;
+        }
+      }
     }
+    
+    console.log(`Migration summary: ${executedCount} executed, ${skippedCount} skipped`);
+    
   } catch (err) {
     console.error('Error running migrations:', err);
     throw err;

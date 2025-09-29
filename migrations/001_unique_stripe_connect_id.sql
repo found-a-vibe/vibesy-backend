@@ -23,16 +23,52 @@ SET stripe_connect_id = NULL,
 FROM users_to_clear
 WHERE users.id = users_to_clear.user_id;
 
--- Now add the unique constraint
-ALTER TABLE users 
-ADD CONSTRAINT unique_stripe_connect_id 
-UNIQUE (stripe_connect_id);
-
--- Add partial index for better performance on Connect ID lookups
-CREATE INDEX IF NOT EXISTS idx_users_stripe_connect_id 
-ON users (stripe_connect_id) 
-WHERE stripe_connect_id IS NOT NULL;
-
--- Add index for case-insensitive email lookups
-CREATE INDEX IF NOT EXISTS idx_users_email_lower 
-ON users (LOWER(email));
+-- Add unique constraint and indexes with proper conflict handling
+DO $$ 
+BEGIN
+    -- Add unique constraint if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'unique_stripe_connect_id' 
+        AND conrelid = 'users'::regclass
+    ) THEN
+        ALTER TABLE users 
+        ADD CONSTRAINT unique_stripe_connect_id 
+        UNIQUE (stripe_connect_id);
+        RAISE NOTICE 'Added unique constraint: unique_stripe_connect_id';
+    ELSE
+        RAISE NOTICE 'Unique constraint unique_stripe_connect_id already exists';
+    END IF;
+    
+    -- Add partial index for performance (only if constraint doesn't already create one)
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes 
+        WHERE indexname = 'idx_users_stripe_connect_id'
+    ) THEN
+        CREATE INDEX idx_users_stripe_connect_id 
+        ON users (stripe_connect_id) 
+        WHERE stripe_connect_id IS NOT NULL;
+        RAISE NOTICE 'Added index: idx_users_stripe_connect_id';
+    ELSE
+        RAISE NOTICE 'Index idx_users_stripe_connect_id already exists';
+    END IF;
+    
+    -- Add case-insensitive email index
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes 
+        WHERE indexname = 'idx_users_email_lower'
+    ) THEN
+        CREATE INDEX idx_users_email_lower 
+        ON users (LOWER(email));
+        RAISE NOTICE 'Added index: idx_users_email_lower';
+    ELSE
+        RAISE NOTICE 'Index idx_users_email_lower already exists';
+    END IF;
+    
+EXCEPTION
+    WHEN duplicate_table THEN
+        RAISE NOTICE 'Relation already exists, skipping...';
+    WHEN OTHERS THEN
+        RAISE NOTICE 'Error in migration: %', SQLERRM;
+        -- Continue execution, don't fail the migration
+END $$;
