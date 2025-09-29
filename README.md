@@ -1,5 +1,70 @@
 # Vibesy Backend
 
+A modern, scalable backend for the FoundAVibe event ticketing platform built with TypeScript, Express, PostgreSQL, and Redis.
+
+## 🏗️ Architecture
+
+The project follows a clean, layered architecture with clear separation of concerns:
+
+```
+src/
+├── index.ts           # Application entry point
+├── server.ts          # Express server configuration
+├── database.ts        # Database connection and utilities
+├── stripe.ts          # Stripe payment integration
+├── routes/            # API route handlers
+├── services/          # Business logic layer
+├── repositories/      # Data access layer
+├── middleware/        # Express middleware
+├── jobs/              # Background job schedulers
+├── utils/             # Utility functions and helpers
+├── templates/         # Email templates
+└── types/             # TypeScript type definitions
+```
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Node.js 18+ 
+- PostgreSQL 12+
+- Redis 6+
+- pnpm (recommended) or npm
+
+### Installation
+
+1. **Clone and install dependencies:**
+   ```bash
+   git clone <repository-url>
+   cd vibesy-backend
+   pnpm install
+   ```
+
+2. **Environment setup:**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
+
+3. **Database setup:**
+   ```bash
+   # Make sure PostgreSQL is running
+   # The application will automatically run schema.sql on startup
+   ```
+
+4. **Development server:**
+   ```bash
+   pnpm dev
+   ```
+
+5. **Production build:**
+   ```bash
+   pnpm build
+   pnpm start
+   ```
+
+# Vibesy Backend
+
 This is the Vibesy backend service built using Express.js. The service provides two main routes: `send` and `verify`, allowing users to send OTPs via email and verify them for authentication purposes. It uses the following technologies:
 
 - **SendGrid**: For sending OTPs via email.
