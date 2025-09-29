@@ -5,6 +5,7 @@ import {
   updateTicketStatus,
   getDatabase
 } from '../database';
+import { stripe, isStripeError, handleStripeError } from '../stripe';
 
 export const ticketRoutes = Router();
 
@@ -239,6 +240,99 @@ ticketRoutes.get('/qr/:token', async (req: Request, res: Response) => {
     console.error('QR code generation error:', error);
     res.status(500).json({ 
       error: { message: 'Failed to generate QR code' } 
+    });
+  }
+});
+
+// GET /tickets/qr/:ticket_id/invoice
+// Get QR code data with invoice information for a ticket
+ticketRoutes.get('/qr/:ticket_id/invoice', async (req: Request, res: Response) => {
+  try {
+    const { ticket_id } = req.params;
+    
+    // Validate ticket_id is a number
+    const ticketIdNum = parseInt(ticket_id);
+    if (isNaN(ticketIdNum) || ticketIdNum < 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid ticket ID'
+      });
+    }
+
+    console.log(`🏇 Getting QR invoice data for ticket: ${ticket_id}`);
+    
+    // Get ticket data with order and event information
+    const db = getDatabase();
+    const result = await db.query(`
+      SELECT 
+        t.*,
+        o.stripe_payment_intent_id,
+        o.buyer_email,
+        o.buyer_name,
+        o.amount_cents,
+        o.platform_fee_cents,
+        o.currency,
+        o.created_at as order_created_at,
+        COALESCE(e.title, o.external_event_title, 'Event Reservation') as event_title,
+        COALESCE(e.venue, 'TBD') as venue,
+        COALESCE(e.starts_at, CURRENT_TIMESTAMP) as starts_at
+      FROM tickets t
+      JOIN orders o ON t.order_id = o.id
+      LEFT JOIN events e ON t.event_id = e.id
+      WHERE t.id = $1
+    `, [ticket_id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Ticket not found'
+      });
+    }
+
+    const ticket = result.rows[0];
+    
+    // Build basic invoice data from ticket/order info
+    let invoiceData = {
+      ticket_token: ticket.qr_token,
+      invoice_id: null as string | null,
+      payment_intent_id: ticket.stripe_payment_intent_id,
+      receipt_url: null as string | null,
+      amount_paid: ticket.amount_cents || 0,
+      currency: ticket.currency || 'usd',
+      payment_date: ticket.order_created_at || new Date().toISOString(),
+      customer_email: ticket.buyer_email,
+      event_title: ticket.event_title,
+      ticket_type: 'General Admission',
+      quantity: 1
+    };
+
+    // If we have a payment intent, try to get the receipt URL from Stripe
+    if (ticket.stripe_payment_intent_id) {
+      try {
+        const charges = await stripe.charges.list({ 
+          payment_intent: ticket.stripe_payment_intent_id,
+          limit: 1
+        });
+        if (charges.data.length > 0) {
+          invoiceData.receipt_url = charges.data[0].receipt_url;
+          if (charges.data[0].invoice) {
+            invoiceData.invoice_id = charges.data[0].invoice as string;
+          }
+        }
+      } catch (stripeError) {
+        console.warn(`Could not fetch Stripe data for payment intent ${ticket.stripe_payment_intent_id}:`, stripeError);
+        // Continue without Stripe data - the basic invoice data is still valid
+      }
+    }
+
+    console.log(`✅ Retrieved QR invoice data for ticket: ${ticket_id}`);
+
+    res.json(invoiceData);
+  } catch (error: any) {
+    console.error('QR invoice data retrieval error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
     });
   }
 });

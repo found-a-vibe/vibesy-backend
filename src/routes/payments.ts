@@ -311,3 +311,149 @@ paymentRoutes.get('/order/:order_id', async (req: Request, res: Response) => {
     });
   }
 });
+
+// GET /payments/invoice/:payment_intent_id
+// Get invoice details for a payment intent
+paymentRoutes.get('/invoice/:payment_intent_id', async (req: Request, res: Response) => {
+  try {
+    const { payment_intent_id } = req.params;
+    
+    if (!payment_intent_id || payment_intent_id.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'Payment intent ID is required'
+      });
+    }
+
+    console.log(`📋 Retrieving invoice for payment intent: ${payment_intent_id}`);
+    
+    // Retrieve payment intent from Stripe
+    const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
+    
+    if (!paymentIntent) {
+      return res.status(404).json({
+        success: false,
+        error: 'Payment intent not found'
+      });
+    }
+
+    // Get invoice if one exists
+    let invoice = null;
+    if (paymentIntent.invoice) {
+      invoice = await stripe.invoices.retrieve(paymentIntent.invoice as string);
+    } else {
+      // Create a mock invoice structure from payment intent data
+      const charges = await stripe.charges.list({ payment_intent: payment_intent_id });
+      const charge = charges.data[0];
+      
+      invoice = {
+        id: `in_mock_${payment_intent_id}`,
+        payment_intent_id: payment_intent_id,
+        status: paymentIntent.status === 'succeeded' ? 'paid' : 'open',
+        amount_due: paymentIntent.amount,
+        amount_paid: paymentIntent.status === 'succeeded' ? paymentIntent.amount : 0,
+        currency: paymentIntent.currency,
+        customer_email: paymentIntent.receipt_email || charge?.billing_details?.email,
+        description: paymentIntent.description || 'Event Ticket Purchase',
+        invoice_date: new Date(paymentIntent.created * 1000).toISOString(),
+        due_date: null,
+        receipt_number: charge?.receipt_number,
+        receipt_url: charge?.receipt_url,
+        invoice_url: null,
+        line_items: [{
+          description: paymentIntent.description || 'Event Ticket',
+          quantity: 1,
+          unit_amount: paymentIntent.amount,
+          amount: paymentIntent.amount,
+          currency: paymentIntent.currency
+        }]
+      };
+    }
+
+    console.log(`✅ Retrieved invoice details for: ${payment_intent_id}`);
+
+    res.json({
+      success: true,
+      invoice: invoice
+    });
+  } catch (error: any) {
+    console.error('Invoice retrieval error:', error);
+    
+    if (isStripeError(error)) {
+      const { message, statusCode } = handleStripeError(error);
+      return res.status(statusCode).json({ 
+        success: false, 
+        error: message 
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+// GET /payments/receipt/:payment_intent_id
+// Get payment receipt for a payment intent
+paymentRoutes.get('/receipt/:payment_intent_id', async (req: Request, res: Response) => {
+  try {
+    const { payment_intent_id } = req.params;
+    
+    if (!payment_intent_id || payment_intent_id.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'Payment intent ID is required'
+      });
+    }
+
+    console.log(`🧾 Retrieving receipt for payment intent: ${payment_intent_id}`);
+    
+    // Retrieve payment intent and charges from Stripe
+    const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
+    const charges = await stripe.charges.list({ payment_intent: payment_intent_id });
+    
+    if (!paymentIntent || charges.data.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Payment not found'
+      });
+    }
+
+    const charge = charges.data[0];
+    const receipt = {
+      payment_intent_id: payment_intent_id,
+      receipt_number: charge.receipt_number,
+      receipt_url: charge.receipt_url,
+      amount_paid: charge.amount,
+      currency: charge.currency,
+      payment_method: charge.payment_method_details?.type || 'card',
+      payment_date: new Date(charge.created * 1000).toISOString(),
+      customer_email: charge.billing_details?.email || paymentIntent.receipt_email,
+      description: paymentIntent.description || 'Event Ticket Purchase',
+      status: charge.status
+    };
+
+    console.log(`✅ Retrieved payment receipt for: ${payment_intent_id}`);
+
+    res.json({
+      success: true,
+      receipt: receipt
+    });
+  } catch (error: any) {
+    console.error('Receipt retrieval error:', error);
+    
+    if (isStripeError(error)) {
+      const { message, statusCode } = handleStripeError(error);
+      return res.status(statusCode).json({ 
+        success: false, 
+        error: message 
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
