@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { 
   createExpressAccount, 
+  findExistingExpressAccount,
   createAccountLink, 
   isAccountOnboardingComplete,
   createDashboardLink,
@@ -11,27 +12,54 @@ import {
   findUserByEmail, 
   createUser,      
   updateUser,
-  findUserByStripeConnectId 
+  findUserByStripeConnectId,
+  findUsersByEmailCaseInsensitive,
+  findUsersWithStripeConnectId
 } from '../database';
 
 export const connectRoutes = Router();
 
-// Helper function to create a new Stripe Connect account
-async function createNewStripeAccount(email: string, userId: number): Promise<string> {
+// Helper function to create or retrieve existing Stripe Connect account
+async function createOrRetrieveStripeAccount(email: string, userId: number): Promise<string> {
   try {
+    // This will now find existing account or create new one
     const stripeAccount = await createExpressAccount(email, 'US');
     const accountId = stripeAccount.id;
     
-    // Update user with new Stripe Connect account ID and clear any previous ID
-    await updateUser(userId, { 
-      stripe_connect_id: accountId,
-      previous_stripe_connect_id: null
-    });
+    // Check if this account is already associated with a different user in our DB
+    const existingUser = await findUserByStripeConnectId(accountId);
     
-    console.log(`Created new Stripe Connect account: ${accountId}`);
+    if (existingUser && existingUser.id !== userId) {
+      console.warn(`Found existing account ${accountId} associated with different user ${existingUser.id}. Current user: ${userId}`);
+      
+      // If the existing user has the same email, update the current user to use this account
+      if (existingUser.email?.toLowerCase() === email.toLowerCase()) {
+        console.log(`Email matches existing user. Updating current user ${userId} to use existing account ${accountId}`);
+        await updateUser(userId, { 
+          stripe_connect_id: accountId,
+          previous_stripe_connect_id: null
+        });
+        
+        // Clear the account from the old user record to avoid conflicts
+        await updateUser(existingUser.id, { 
+          stripe_connect_id: null,
+          previous_stripe_connect_id: accountId
+        });
+      } else {
+        throw new Error(`Connect account ${accountId} is already associated with a different email address`);
+      }
+    } else {
+      // Update user with Stripe Connect account ID and clear any previous ID
+      await updateUser(userId, { 
+        stripe_connect_id: accountId,
+        previous_stripe_connect_id: null
+      });
+    }
+    
+    console.log(`Successfully associated Stripe Connect account: ${accountId} with user: ${userId}`);
     return accountId;
   } catch (error) {
-    console.error('Error creating new Stripe Connect account:', error);
+    console.error('Error creating/retrieving Stripe Connect account:', error);
     throw error;
   }
 }
@@ -108,7 +136,7 @@ connectRoutes.post('/onboard-link', async (req: Request, res: Response) => {
           } else {
             console.log(`Previous account exists but email doesn't match. Creating new account.`);
             try {
-              stripeAccountId = await createNewStripeAccount(email, user.id);
+              stripeAccountId = await createOrRetrieveStripeAccount(email, user.id);
             } catch (createError) {
               console.error('Failed to create new Stripe Connect account:', createError);
               if (isStripeError(createError)) {
@@ -121,7 +149,7 @@ connectRoutes.post('/onboard-link', async (req: Request, res: Response) => {
         } catch (error) {
           console.log(`Previous Stripe Connect account (${previousAccountId}) no longer exists or is invalid. Creating new account.`);
           try {
-            stripeAccountId = await createNewStripeAccount(email, user.id);
+            stripeAccountId = await createOrRetrieveStripeAccount(email, user.id);
           } catch (createError) {
             console.error('Failed to create new Stripe Connect account:', createError);
             if (isStripeError(createError)) {
@@ -134,7 +162,7 @@ connectRoutes.post('/onboard-link', async (req: Request, res: Response) => {
       } else {
         console.log(`No previous Stripe Connect account found for ${email}. Creating new account.`);
         try {
-          stripeAccountId = await createNewStripeAccount(email, user.id);
+          stripeAccountId = await createOrRetrieveStripeAccount(email, user.id);
         } catch (createError) {
           console.error('Failed to create new Stripe Connect account:', createError);
           if (isStripeError(createError)) {

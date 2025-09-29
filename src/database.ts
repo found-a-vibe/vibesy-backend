@@ -146,6 +146,18 @@ export async function findUserByStripeConnectId(connectId: string): Promise<User
   return result.rows[0] || null;
 }
 
+export async function findUsersByEmailCaseInsensitive(email: string): Promise<User[]> {
+  const db = getDatabase();
+  const result = await db.query('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email]);
+  return result.rows;
+}
+
+export async function findUsersWithStripeConnectId(connectId: string): Promise<User[]> {
+  const db = getDatabase();
+  const result = await db.query('SELECT * FROM users WHERE stripe_connect_id = $1', [connectId]);
+  return result.rows;
+}
+
 export async function findUserById(id: number): Promise<User | null> {
   const db = getDatabase();
   const result = await db.query('SELECT * FROM users WHERE id = $1', [id]);
@@ -197,7 +209,7 @@ export async function updateUser(id: number, updates: Partial<User>): Promise<Us
 
   const result = await db.query(
     `UPDATE users SET ${setClause} WHERE id = $1 RETURNING *`,
-    [id, ...fields.map(field => validUpdates[field as keyof User])]
+    [id, ...fields.map(field => (validUpdates as any)[field])]
   );
 
   if (result.rows.length === 0) {

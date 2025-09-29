@@ -34,8 +34,40 @@ export async function getOrCreateCustomer(email: string, name?: string): Promise
   });
 }
 
-// Create Stripe Express Connect account for host
+// Find existing Stripe Express Connect account by email
+export async function findExistingExpressAccount(email: string): Promise<Stripe.Account | null> {
+  try {
+    // Search for existing accounts with the same email
+    const accounts = await stripe.accounts.list({
+      limit: 10, // Search through recent accounts
+    });
+    
+    // Filter for accounts with matching email (case-insensitive)
+    const existingAccount = accounts.data.find(account => 
+      account.email && account.email.toLowerCase() === email.toLowerCase() &&
+      account.type === 'express' &&
+      account.metadata?.created_by === 'vibesy_app'
+    );
+    
+    return existingAccount || null;
+  } catch (error) {
+    console.error('Error searching for existing Connect accounts:', error);
+    return null;
+  }
+}
+
+// Create or retrieve existing Stripe Express Connect account for host
 export async function createExpressAccount(email: string, country: string = 'US'): Promise<Stripe.Account> {
+  // First, check if an account already exists for this email
+  const existingAccount = await findExistingExpressAccount(email);
+  
+  if (existingAccount) {
+    console.log(`Found existing Stripe Connect account for ${email}: ${existingAccount.id}`);
+    return existingAccount;
+  }
+  
+  // Create new account if none exists
+  console.log(`Creating new Stripe Connect account for ${email}`);
   return await stripe.accounts.create({
     type: 'express',
     country: country,
