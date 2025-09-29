@@ -274,6 +274,27 @@ export async function createTickets(orderId: string, eventId: number, quantity: 
   return tickets;
 }
 
+export async function createTicketsForExternalEvent(orderId: string, externalEventId: string, quantity: number, holderInfo: { name?: string, email?: string }): Promise<Ticket[]> {
+  const db = getDatabase();
+  const tickets: Ticket[] = [];
+
+  for (let i = 0; i < quantity; i++) {
+    const qrToken = `${orderId}-${i + 1}-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+    const ticketNumber = `VBS-${orderId.toString().padStart(6, '0')}-${(i + 1).toString().padStart(3, '0')}`;
+
+    const result = await db.query(
+      `INSERT INTO tickets (order_id, external_event_id, qr_token, ticket_number, holder_name, holder_email)
+       VALUES ($1::BIGINT, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [orderId, externalEventId, qrToken, ticketNumber, holderInfo.name, holderInfo.email]
+    );
+
+    tickets.push(result.rows[0]);
+  }
+
+  return tickets;
+}
+
 export async function findTicketByQRToken(qrToken: string): Promise<(Ticket & { event: Event }) | null> {
   const db = getDatabase();
   const result = await db.query(
@@ -356,7 +377,9 @@ export interface Event {
 export interface Order {
   id: string;
   buyer_id: number;
-  event_id: number;
+  event_id?: number; // Optional for external events
+  external_event_id?: string; // For UUID events from Firestore
+  external_event_title?: string; // Display title for external events
   quantity: number;
   amount_cents: number;
   platform_fee_cents: number;
@@ -374,7 +397,8 @@ export interface Order {
 export interface Ticket {
   id: number;
   order_id: string;
-  event_id: number;
+  event_id?: number; // Optional for external events
+  external_event_id?: string; // For UUID events from Firestore
   qr_token: string;
   ticket_number?: string;
   holder_name?: string;

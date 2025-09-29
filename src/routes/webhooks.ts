@@ -8,6 +8,7 @@ import {
 import { 
   updateOrderStatus,
   createTickets,
+  createTicketsForExternalEvent,
   getDatabase
 } from '../database';
 
@@ -91,37 +92,67 @@ async function handlePaymentSucceeded(event: any) {
 
     console.log(`📝 Updated order ${order.id} to completed status`);
 
-    // Generate tickets
-    const holderInfo = {
-      name: order.buyer_name || undefined,
-      email: order.buyer_email || undefined
-    };
-
-    const tickets = await createTickets(
-      order.id,
-      order.event_id,
-      order.quantity,
-      holderInfo
-    );
-
-    console.log(`🎫 Generated ${tickets.length} tickets for order ${order.id}`);
-
-    // Update event tickets_sold count
+    // Check if tickets already exist for this order to avoid duplicates
     const db = getDatabase();
-    await db.query(
-      'UPDATE events SET tickets_sold = tickets_sold + $1 WHERE id = $2',
-      [order.quantity, order.event_id]
+    const existingTicketsResult = await db.query(
+      'SELECT COUNT(*) as count FROM tickets WHERE order_id = $1',
+      [order.id]
     );
+    
+    const existingTicketCount = parseInt(existingTicketsResult.rows[0].count);
+    
+    if (existingTicketCount > 0) {
+      console.log(`🎫 Order ${order.id} already has ${existingTicketCount} tickets, skipping ticket creation`);
+    } else {
+      console.log(`🎫 Creating tickets for order ${order.id} (no existing tickets found)`);
+      
+      // Generate tickets only if none exist
+      const holderInfo = {
+        name: order.buyer_name || undefined,
+        email: order.buyer_email || undefined
+      };
 
+      // Handle both internal events (event_id) and external events (external_event_id)
+      let tickets;
+      if (order.event_id) {
+        // Traditional internal event
+        tickets = await createTickets(
+          order.id,
+          order.event_id,
+          order.quantity,
+          holderInfo
+        );
+        
+        // Update event tickets_sold count for internal events
+        await db.query(
+          'UPDATE events SET tickets_sold = tickets_sold + $1 WHERE id = $2',
+          [order.quantity, order.event_id]
+        );
+      } else if (order.external_event_id) {
+        // External UUID event - create tickets differently
+        tickets = await createTicketsForExternalEvent(
+          order.id,
+          order.external_event_id,
+          order.quantity,
+          holderInfo
+        );
+      } else {
+        console.error(`Order ${order.id} has neither event_id nor external_event_id`);
+        return;
+      }
+
+      console.log(`🎫 Generated ${tickets.length} tickets for order ${order.id}`);
+
+      // Log ticket QR tokens for verification (remove in production)
+      tickets.forEach((ticket, index) => {
+        console.log(`🎫 Ticket ${index + 1}: ${ticket.ticket_number} - QR: ${ticket.qr_token.substring(0, 8)}...`);
+      });
+    }
+    
     // TODO: Send confirmation email with tickets to buyer
     // TODO: Send notification to host about sale
     
     console.log(`✅ Successfully processed payment for order ${order.id}`);
-
-    // Log ticket QR tokens for verification (remove in production)
-    tickets.forEach((ticket, index) => {
-      console.log(`🎫 Ticket ${index + 1}: ${ticket.ticket_number} - QR: ${ticket.qr_token.substring(0, 8)}...`);
-    });
 
   } catch (error) {
     console.error('Error processing successful payment:', error);
@@ -223,6 +254,40 @@ async function handleAccountUpdated(event: any) {
     console.error('Error handling account update:', error);
   }
 }
+
+// Test endpoint to simulate payment success webhook (for debugging)
+// Use JSON middleware for this specific endpoint
+webhookRoutes.post('/test/payment-succeeded', express.json(), async (req: Request, res: Response) => {
+  const { payment_intent_id } = req.body;
+  
+  if (!payment_intent_id) {
+    return res.status(400).json({ error: 'payment_intent_id is required' });
+  }
+  
+  console.log(`🧪 Test webhook: Simulating payment success for ${payment_intent_id}`);
+  
+  try {
+    // Create a mock webhook event
+    const mockEvent = {
+      data: {
+        object: {
+          id: payment_intent_id,
+          latest_charge: 'ch_test_mock'
+        }
+      }
+    };
+    
+    await handlePaymentSucceeded(mockEvent);
+    
+    res.json({
+      success: true,
+      message: `Simulated payment success webhook for ${payment_intent_id}`
+    });
+  } catch (error) {
+    console.error('Test webhook error:', error);
+    res.status(500).json({ error: 'Test webhook failed' });
+  }
+});
 
 // Health check for webhooks
 webhookRoutes.get('/health', (req: Request, res: Response) => {

@@ -224,75 +224,99 @@ reservationPaymentRoutes.post('/intent', async (req: Request, res: Response) => 
 
     console.log(`Created PaymentIntent: ${paymentIntent.id} for UUID event: ${event_id}`);
 
-    // Create a proper order record in the database
-    // For UUID events, we use external_event_id instead of event_id
-    const orderResult = await db.query(`
-      INSERT INTO orders (
-        buyer_id, 
-        external_event_id,
-        external_event_title,
-        quantity, 
-        amount_cents, 
-        platform_fee_cents, 
-        host_amount_cents, 
-        currency,
-        stripe_payment_intent_id,
-        status,
-        buyer_email,
-        buyer_name
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-      RETURNING id
-    `, [
-      buyer.id,
-      event_id, // UUID from Firestore
-      mockEvent.title, // Event title for display
-      quantity,
-      totalAmountCents,
-      platformFeeCents,
-      hostAmountCents,
-      currency,
-      paymentIntent.id,
-      'pending',
-      buyer_email,
-      buyer_name || ''
-    ]);
-    
-    const orderId = orderResult.rows[0].id;
-    console.log(`Created order record with ID: ${orderId}`);
+    // Idempotency: Check if an order already exists for this PaymentIntent
+    let existingOrder = await db.query(
+      'SELECT id FROM orders WHERE stripe_payment_intent_id = $1',
+      [paymentIntent.id]
+    );
 
-    // Create tickets for this order
-    const ticketCreationPromises = [];
-    for (let i = 0; i < quantity; i++) {
-      const ticketNumber = `VBS-${orderId.toString().padStart(6, '0')}-${(i + 1).toString().padStart(3, '0')}`;
-      const qrToken = `${orderId}-${i + 1}-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
-      
-      const ticketPromise = db.query(`
-        INSERT INTO tickets (
-          order_id,
+    let orderId: number;
+    if (existingOrder.rows.length > 0) {
+      orderId = existingOrder.rows[0].id;
+      console.log(`Order already exists for PaymentIntent ${paymentIntent.id}: ${orderId}`);
+    } else {
+      // Create a proper order record in the database
+      // For UUID events, we use external_event_id instead of event_id
+      const orderResult = await db.query(`
+        INSERT INTO orders (
+          buyer_id, 
           external_event_id,
-          qr_token,
-          ticket_number,
-          holder_name,
-          holder_email,
-          status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+          external_event_title,
+          quantity, 
+          amount_cents, 
+          platform_fee_cents, 
+          host_amount_cents, 
+          currency,
+          stripe_payment_intent_id,
+          status,
+          buyer_email,
+          buyer_name
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING id
       `, [
-        orderId,
+        buyer.id,
         event_id, // UUID from Firestore
-        qrToken,
-        ticketNumber,
-        buyer_name || '',
+        mockEvent.title, // Event title for display
+        quantity,
+        totalAmountCents,
+        platformFeeCents,
+        hostAmountCents,
+        currency,
+        paymentIntent.id,
+        'pending',
         buyer_email,
-        'valid'
+        buyer_name || ''
       ]);
       
-      ticketCreationPromises.push(ticketPromise);
+      orderId = orderResult.rows[0].id;
+      console.log(`Created order record with ID: ${orderId}`);
     }
-    
-    // Wait for all tickets to be created
-    const ticketResults = await Promise.all(ticketCreationPromises);
-    console.log(`Created ${ticketResults.length} tickets for order ${orderId}`);
+
+    // Idempotency: Skip ticket creation if they already exist for this order
+    const existingTickets = await db.query(
+      'SELECT COUNT(*) as count FROM tickets WHERE order_id = $1',
+      [orderId]
+    );
+
+    let ticketResults;
+    if (parseInt(existingTickets.rows[0].count) > 0) {
+      console.log(`Tickets already exist for order ${orderId}, skipping creation`);
+      ticketResults = [];
+    } else {
+      // Create tickets for this order
+      const ticketCreationPromises = [];
+      for (let i = 0; i < quantity; i++) {
+        const ticketNumber = `VBS-${orderId.toString().padStart(6, '0')}-${(i + 1).toString().padStart(3, '0')}`;
+        const qrToken = `${orderId}-${i + 1}-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+        
+        const ticketPromise = db.query(`
+          INSERT INTO tickets (
+            order_id,
+            external_event_id,
+            qr_token,
+            ticket_number,
+            holder_name,
+            holder_email,
+            status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+          RETURNING id
+        `, [
+          orderId,
+          event_id, // UUID from Firestore
+          qrToken,
+          ticketNumber,
+          buyer_name || '',
+          buyer_email,
+          'valid'
+        ]);
+        
+        ticketCreationPromises.push(ticketPromise);
+      }
+      
+      // Wait for all tickets to be created
+      ticketResults = await Promise.all(ticketCreationPromises);
+      console.log(`Created ${ticketResults.length} tickets for order ${orderId}`);
+    }
 
     // Return configuration for PaymentSheet (matching the iOS TicketPaymentIntentResponse format)
     

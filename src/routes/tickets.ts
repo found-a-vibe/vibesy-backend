@@ -394,3 +394,34 @@ ticketRoutes.get('/event/:event_id/stats', async (req: Request, res: Response) =
     });
   }
 });
+
+// Debug endpoint to list all orders
+ticketRoutes.get('/debug/orders', async (req: Request, res: Response) => {
+  try {
+    const db = getDatabase();
+    const result = await db.query(`
+      SELECT 
+        id, 
+        buyer_email, 
+        external_event_id, 
+        external_event_title,
+        status, 
+        amount_cents, 
+        created_at,
+        stripe_payment_intent_id
+      FROM orders 
+      ORDER BY created_at DESC 
+      LIMIT 10
+    `);
+    
+    res.json({
+      success: true,
+      orders: result.rows
+    });
+  } catch (error) {
+    console.error('Debug orders error:', error);
+    res.status(500).json({ 
+      error: { message: 'Internal server error' } 
+    });
+  }
+});
