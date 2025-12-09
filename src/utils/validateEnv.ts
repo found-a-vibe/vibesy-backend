@@ -157,10 +157,16 @@ export const validateEnv = (): void => {
 
 // Validation helper functions
 function isValidHostname(hostname: string): boolean {
-  // Allow localhost, IP addresses, domain names, and cloud provider hostnames (e.g., Render.com format)
-  // Render.com format: dpg-xxxxx-a or similar with hyphens and alphanumeric
-  const hostnameRegex = /^(localhost|(\d{1,3}\.){3}\d{1,3}|([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.[a-zA-Z]{2,}|[a-zA-Z0-9-]+)$/;
-  return hostnameRegex.test(hostname) && hostname.length > 0;
+  // Allow localhost, IP addresses, domain names, and cloud provider hostnames
+  // Very permissive to support various cloud provider formats (AWS RDS, GCP, Azure, Render, etc.)
+  // Must contain only alphanumeric, hyphens, dots, and underscores
+  // Cannot start or end with hyphen or dot
+  if (!hostname || hostname.length === 0) return false;
+  if (hostname.startsWith('-') || hostname.startsWith('.') || hostname.endsWith('.')) return false;
+  
+  // Allow alphanumeric, hyphens, dots, underscores
+  const validChars = /^[a-zA-Z0-9.-]+$/;
+  return validChars.test(hostname);
 }
 
 function isValidPort(port: string): boolean {
