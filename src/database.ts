@@ -17,16 +17,24 @@ class PostgreSQLConnection implements DatabaseConnection {
   private pool: Pool;
 
   constructor() {
-    this.pool = new Pool({
+    // Use DATABASE_URL if available (common in production), otherwise use individual variables
+    const config = process.env.DATABASE_URL ? {
+      connectionString: process.env.DATABASE_URL,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000, // Increased to 10 seconds for cloud databases
+    } : {
       host: process.env.PG_HOST || 'localhost',
       port: parseInt(process.env.PG_PORT || '5432'),
       database: process.env.PG_DATABASE || 'vibesy_db',
       user: process.env.PG_USER || 'vibesy_user',
       password: process.env.PG_PASSWORD || 'vibesy_pass',
-      max: 20, // Maximum number of clients in pool
-      idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-      connectionTimeoutMillis: 2000, // Return an error after 2 seconds if connection could not be established
-    });
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    };
+    
+    this.pool = new Pool(config);
 
     // Handle pool errors
     this.pool.on('error', (err) => {
