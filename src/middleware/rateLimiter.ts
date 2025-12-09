@@ -97,7 +97,7 @@ export const paymentLimiter = rateLimit({
  */
 export const connectLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 3, // Max 3 Connect operations per hour per IP
+  max: 20, // Max 20 Connect operations per hour per IP (increased for status checks)
   message: {
     success: false,
     error: {
@@ -110,6 +110,8 @@ export const connectLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: false,
+  // Skip GET requests (status checks) from rate limit
+  skip: (req) => req.method === 'GET',
   handler: (req, res) => {
     console.warn(`Connect rate limit exceeded for IP: ${req.ip}`);
     res.status(429).json({
