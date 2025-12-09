@@ -5,7 +5,7 @@ import { firestore } from '../database';
 import { validateRequest } from '../middleware/validation';
 import { ApiError } from '../utils/errors';
 
-export const reservationsRoutes = express.Router();
+export const reservationsRoutes: ReturnType<typeof express.Router> = express.Router();
 
 /**
  * Create a reservation record

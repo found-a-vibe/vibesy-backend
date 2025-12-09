@@ -5,7 +5,7 @@ import { notificationService } from '../services/notificationService';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ApiError } from '../utils/errors';
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 interface NotificationRequest {
   title: string;

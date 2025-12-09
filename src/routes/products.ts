@@ -3,7 +3,7 @@ import { createErrorResponse } from '../utils/errors';
 import { stripe } from '../stripe';
 import { getDatabase } from '../database';
 
-export const productsRoutes = Router();
+export const productsRoutes: ReturnType<typeof Router> = Router();
 
 // POST /stripe/products
 // Create a Stripe product for an event

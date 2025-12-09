@@ -1,16 +1,29 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import { config } from 'dotenv';
 import { initializeDatabase } from './database';
 import { logRequest, logError } from './middleware/logger';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { createErrorResponse, ApiError } from './utils/errors';
 import { jobScheduler } from './jobs/jobScheduler';
+import { validateEnv } from './utils/validateEnv';
+import { 
+  globalLimiter, 
+  otpLimiter, 
+  paymentLimiter, 
+  connectLimiter, 
+  ticketScanLimiter, 
+  authLimiter 
+} from './middleware/rateLimiter';
 
 // Load environment variables
 if (process.env.NODE_ENV !== 'production') {
   config();
 }
+
+// Validate environment variables before starting
+validateEnv();
 
 // Import route handlers
 import { connectRoutes } from './routes/connect';
@@ -29,14 +42,64 @@ import { reservationPaymentRoutes } from './routes/reservationPayments';
 const app = express();
 const port = parseInt(process.env.SERVER_PORT || '4242');
 
-// CORS configuration
+// Security: HTTPS redirect in production
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    if (req.header('x-forwarded-proto') !== 'https') {
+      res.redirect(`https://${req.header('host')}${req.url}`);
+    } else {
+      next();
+    }
+  });
+}
+
+// Security headers with Helmet
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "https://api.stripe.com"],
+      frameSrc: ["'self'", "https://js.stripe.com", "https://hooks.stripe.com"],
+    },
+  },
+  hsts: {
+    maxAge: 31536000, // 1 year
+    includeSubDomains: true,
+    preload: true
+  },
+  noSniff: true,
+  xssFilter: true,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  frameguard: { action: 'deny' }
+}));
+
+// CORS configuration with environment-based origins
+const allowedOrigins = process.env.NODE_ENV === 'production'
+  ? [
+      process.env.FRONTEND_URL || '',
+      'vibesy://stripe/onboard_complete',
+      'vibesy://stripe/onboard_refresh'
+    ].filter(Boolean)
+  : [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'vibesy://'
+    ];
+
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:3001', 
-    'https://your-frontend-domain.com', // Add your production domain
-    'vibesy://', // Allow iOS app scheme
-  ],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.some(allowed => origin.startsWith(allowed.replace('://', ''))) || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'stripe-signature'],
@@ -61,6 +124,16 @@ app.use(express.urlencoded({ extended: true }));
 
 // Enhanced request logging middleware
 app.use(logRequest);
+
+// Rate limiting - apply to specific route groups
+app.use('/otp', otpLimiter);
+app.use('/auth', authLimiter);
+app.use('/payments', paymentLimiter);
+app.use('/connect', connectLimiter);
+app.use('/tickets/scan', ticketScanLimiter);
+
+// Global rate limiter for all routes
+app.use(globalLimiter);
 
 // API routes
 app.use('/connect', connectRoutes);

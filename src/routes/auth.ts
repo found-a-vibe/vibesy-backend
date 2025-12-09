@@ -1,11 +1,12 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import { logTime } from '../middleware/logger';
 import { validatePasswordReset } from '../middleware/validation';
 import { adminService } from '../services/adminService';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ApiError } from '../utils/errors';
+import { requireAuth, AuthRequest } from '../middleware/auth';
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 interface PasswordResetRequest {
   uid: string;
@@ -18,11 +19,16 @@ interface ApiResponse {
   data?: any;
 }
 
-const resetPasswordHandler = asyncHandler(async (req: Request, res: Response) => {
+const resetPasswordHandler = asyncHandler(async (req: AuthRequest, res: Response) => {
   const { uid, password }: PasswordResetRequest = req.body;
 
   if (!uid || !password) {
     throw new ApiError(400, 'Bad Request', 'User ID and password are required');
+  }
+
+  // SECURITY: Verify user is resetting their OWN password
+  if (!req.user || req.user.uid !== uid) {
+    throw new ApiError(403, 'Forbidden', 'Cannot reset another user\'s password');
   }
 
   const userRecord = await adminService.auth().updateUser(uid, { password });
@@ -40,6 +46,6 @@ const resetPasswordHandler = asyncHandler(async (req: Request, res: Response) =>
   res.status(200).json(response);
 });
 
-router.post('/reset-password', logTime, validatePasswordReset, resetPasswordHandler);
+router.post('/reset-password', requireAuth, logTime, validatePasswordReset, resetPasswordHandler);
 
 export { router as authRoutes };

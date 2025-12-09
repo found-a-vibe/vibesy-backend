@@ -12,7 +12,7 @@ import {
   getDatabase
 } from '../database';
 
-export const webhookRoutes = Router();
+export const webhookRoutes: ReturnType<typeof Router> = Router();
 
 // Raw body parser for webhook signature verification
 webhookRoutes.use('/stripe', express.raw({ type: 'application/json' }));
@@ -82,28 +82,50 @@ async function handlePaymentSucceeded(event: any) {
   console.log(`💳 Payment succeeded: ${paymentIntentId}`);
 
   try {
-    // Update order status to completed
-    const order = await updateOrderStatus(paymentIntentId, 'completed', paymentIntent.latest_charge);
-
-    if (!order) {
-      console.error(`Order not found for payment intent: ${paymentIntentId}`);
-      return;
-    }
-
-    console.log(`📝 Updated order ${order.id} to completed status`);
-
-    // Check if tickets already exist for this order to avoid duplicates
+    // RACE CONDITION FIX: Use transaction to prevent duplicate ticket creation
     const db = getDatabase();
-    const existingTicketsResult = await db.query(
-      'SELECT COUNT(*) as count FROM tickets WHERE order_id = $1',
-      [order.id]
-    );
+    const client = await db.connect();
     
-    const existingTicketCount = parseInt(existingTicketsResult.rows[0].count);
-    
-    if (existingTicketCount > 0) {
-      console.log(`🎫 Order ${order.id} already has ${existingTicketCount} tickets, skipping ticket creation`);
-    } else {
+    try {
+      await client.query('BEGIN');
+
+      // Lock the order row to prevent concurrent ticket creation
+      const orderResult = await client.query(
+        'SELECT * FROM orders WHERE stripe_payment_intent_id = $1 FOR UPDATE',
+        [paymentIntentId]
+      );
+
+      if (orderResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        console.error(`Order not found for payment intent: ${paymentIntentId}`);
+        return;
+      }
+
+      const order = orderResult.rows[0];
+
+      // Update order status to completed if not already
+      if (order.status !== 'completed') {
+        await client.query(
+          'UPDATE orders SET status = $1, stripe_charge_id = $2, updated_at = NOW() WHERE id = $3',
+          ['completed', paymentIntent.latest_charge, order.id]
+        );
+        console.log(`📝 Updated order ${order.id} to completed status`);
+      }
+
+      // Check if tickets already exist for this order to avoid duplicates
+      const existingTicketsResult = await client.query(
+        'SELECT COUNT(*) as count FROM tickets WHERE order_id = $1',
+        [order.id]
+      );
+      
+      const existingTicketCount = parseInt(existingTicketsResult.rows[0].count);
+      
+      if (existingTicketCount > 0) {
+        console.log(`🎫 Order ${order.id} already has ${existingTicketCount} tickets, skipping ticket creation`);
+        await client.query('COMMIT');
+        return;
+      }
+
       console.log(`🎫 Creating tickets for order ${order.id} (no existing tickets found)`);
       
       // Generate tickets only if none exist
@@ -123,11 +145,8 @@ async function handlePaymentSucceeded(event: any) {
           holderInfo
         );
         
-        // Update event tickets_sold count for internal events
-        await db.query(
-          'UPDATE events SET tickets_sold = tickets_sold + $1 WHERE id = $2',
-          [order.quantity, order.event_id]
-        );
+        // Note: tickets_sold already updated in payment intent creation with transaction
+        // No need to update again here to avoid double-counting
       } else if (order.external_event_id) {
         // External UUID event - create tickets differently
         tickets = await createTicketsForExternalEvent(
@@ -137,16 +156,22 @@ async function handlePaymentSucceeded(event: any) {
           holderInfo
         );
       } else {
+        await client.query('ROLLBACK');
         console.error(`Order ${order.id} has neither event_id nor external_event_id`);
         return;
       }
 
+      await client.query('COMMIT');
+
       console.log(`🎫 Generated ${tickets.length} tickets for order ${order.id}`);
 
-      // Log ticket QR tokens for verification (remove in production)
-      tickets.forEach((ticket, index) => {
-        console.log(`🎫 Ticket ${index + 1}: ${ticket.ticket_number} - QR: ${ticket.qr_token.substring(0, 8)}...`);
-      });
+      // Log ticket creation (sensitive QR tokens removed from logs)
+      console.log(`🎫 Generated ${tickets.length} tickets with numbers: ${tickets.map(t => t.ticket_number).join(', ')}`);
+    } catch (txError) {
+      await client.query('ROLLBACK');
+      throw txError;
+    } finally {
+      client.release();
     }
     
     // TODO: Send confirmation email with tickets to buyer
@@ -255,39 +280,8 @@ async function handleAccountUpdated(event: any) {
   }
 }
 
-// Test endpoint to simulate payment success webhook (for debugging)
-// Use JSON middleware for this specific endpoint
-webhookRoutes.post('/test/payment-succeeded', express.json(), async (req: Request, res: Response) => {
-  const { payment_intent_id } = req.body;
-  
-  if (!payment_intent_id) {
-    return res.status(400).json({ error: 'payment_intent_id is required' });
-  }
-  
-  console.log(`🧪 Test webhook: Simulating payment success for ${payment_intent_id}`);
-  
-  try {
-    // Create a mock webhook event
-    const mockEvent = {
-      data: {
-        object: {
-          id: payment_intent_id,
-          latest_charge: 'ch_test_mock'
-        }
-      }
-    };
-    
-    await handlePaymentSucceeded(mockEvent);
-    
-    res.json({
-      success: true,
-      message: `Simulated payment success webhook for ${payment_intent_id}`
-    });
-  } catch (error) {
-    console.error('Test webhook error:', error);
-    res.status(500).json({ error: 'Test webhook failed' });
-  }
-});
+// Test endpoint - REMOVED for security. Use Stripe CLI for testing:
+// stripe listen --forward-to localhost:4242/webhooks/stripe
 
 // Health check for webhooks
 webhookRoutes.get('/health', (req: Request, res: Response) => {

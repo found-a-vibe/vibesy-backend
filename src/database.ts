@@ -9,6 +9,7 @@ export const firestore = adminService.firestore();
 
 export interface DatabaseConnection {
   query(sql: string, params?: any[]): Promise<any>;
+  connect(): Promise<any>;
   close(): Promise<void>;
 }
 
@@ -40,6 +41,10 @@ class PostgreSQLConnection implements DatabaseConnection {
     } finally {
       client.release();
     }
+  }
+
+  async connect(): Promise<any> {
+    return await this.pool.connect();
   }
 
   async close(): Promise<void> {
@@ -418,8 +423,10 @@ export interface User {
   first_name?: string;
   last_name?: string;
   phone?: string;
+  firebase_uid?: string;
   stripe_customer_id?: string;
   stripe_connect_id?: string;
+  previous_stripe_connect_id?: string;
   connect_onboarding_complete: boolean;
   created_at: string;
   updated_at: string;

@@ -43,7 +43,7 @@ class OTPService {
       expirySeconds
     );
 
-    console.log(`OTP generated for ${identifier}: ${code} (expires at ${expiresAt.toISOString()})`);
+    console.log(`OTP generated for ${identifier} (expires at ${expiresAt.toISOString()})`);
     
     return { code, expiresAt };
   }

@@ -5,7 +5,7 @@ import { firestore } from '../database';
 import { validateRequest } from '../middleware/validation';
 import { ApiError } from '../utils/errors';
 
-export const paymentIntentsRoutes = express.Router();
+export const paymentIntentsRoutes: ReturnType<typeof express.Router> = express.Router();
 
 /**
  * Create a payment intent for event ticket purchase

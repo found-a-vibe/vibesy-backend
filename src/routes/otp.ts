@@ -6,8 +6,9 @@ import { emailService } from '../services/emailService';
 import { otpService } from '../services/otpService';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ApiError } from '../utils/errors';
+import { validateSchema, emailSchema, otpVerifySchema } from '../middleware/schemaValidation';
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 interface SendOTPRequest {
   email: string;
@@ -75,7 +76,7 @@ const verifyOTPHandler = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json(response);
 });
 
-router.post('/send', logTime, validateEmail, verifyEmail, sendOTPHandler);
-router.post('/verify', logTime, validateOTP, verifyEmail, verifyOTPHandler);
+router.post('/send', validateSchema(emailSchema), logTime, validateEmail, verifyEmail, sendOTPHandler);
+router.post('/verify', validateSchema(otpVerifySchema), logTime, validateOTP, verifyEmail, verifyOTPHandler);
 
 export { router as otpRoutes };

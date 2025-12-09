@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import { 
   stripe,
   calculatePlatformFee,
@@ -18,187 +18,189 @@ import {
   findUserByStripeConnectId,
   getDatabase
 } from '../database';
+import { requireAuth, AuthRequest } from '../middleware/auth';
+import { validateSchema, paymentIntentSchema, customerCreateSchema } from '../middleware/schemaValidation';
+import { ApiError } from '../utils/errors';
+import { asyncHandler } from '../utils/asyncHandler';
 
-export const paymentRoutes = Router();
+export const paymentRoutes: ReturnType<typeof Router> = Router();
 
 // POST /payments/intent
 // Create PaymentIntent for ticket purchase with destination charges
-paymentRoutes.post('/intent', async (req: Request, res: Response) => {
-  try {
-    const {
-      event_id,
-      quantity = 1,
-      buyer_email,
-      buyer_name,
-      currency = 'usd'
-    } = req.body;
+paymentRoutes.post('/intent', requireAuth, validateSchema(paymentIntentSchema), asyncHandler(async (req: AuthRequest, res: Response) => {
+  const {
+    event_id,
+    quantity = 1,
+    buyer_email,
+    buyer_name,
+    currency = 'usd'
+  } = req.body;
 
-    // Validate required fields
-    if (!event_id || !buyer_email) {
-      return res.status(400).json({ 
-        error: { message: 'event_id and buyer_email are required' } 
-      });
-    }
+  // SECURITY: Verify authenticated user email matches buyer email
+  if (req.user?.email && buyer_email !== req.user.email) {
+    throw new ApiError(403, 'Forbidden', 'Buyer email must match authenticated user');
+  }
 
-    if (quantity < 1 || quantity > 10) {
-      return res.status(400).json({ 
-        error: { message: 'quantity must be between 1 and 10' } 
-      });
-    }
+  console.log(`Creating payment intent for event ${event_id}, quantity: ${quantity}`);
 
-    console.log(`Creating payment intent for event ${event_id}, quantity: ${quantity}`);
+  // Get event details
+  const event = await findEventById(event_id);
+  if (!event) {
+    throw new ApiError(404, 'Not Found', 'Event not found');
+  }
 
-    // Get event details
-    const event = await findEventById(event_id);
-    if (!event) {
-      return res.status(404).json({ 
-        error: { message: 'Event not found' } 
-      });
-    }
+  // Check if event is active and has capacity
+  if (event.status !== 'active') {
+    throw new ApiError(400, 'Bad Request', 'Event is not available for purchase');
+  }
 
-    // Check if event is active and has capacity
-    if (event.status !== 'active') {
-      return res.status(400).json({ 
-        error: { message: 'Event is not available for purchase' } 
-      });
-    }
+  // Get host information
+  const hostUser = await findUserById(event.host_id);
+  if (!hostUser) {
+    throw new ApiError(500, 'Internal Server Error', 'Event host not found');
+  }
 
-    if (event.tickets_sold + quantity > event.capacity) {
-      return res.status(400).json({ 
-        error: { message: 'Not enough tickets available' } 
-      });
-    }
+  if (!hostUser.stripe_connect_id || !hostUser.connect_onboarding_complete) {
+    throw new ApiError(400, 'Bad Request', 'Host payment setup incomplete');
+  }
 
-    // Get host information
-    const hostUser = await findUserById(event.host_id);
-    if (!hostUser) {
-      return res.status(500).json({ 
-        error: { message: 'Event host not found' } 
-      });
-    }
+  // Calculate amounts
+  const ticketPriceCents = event.price_cents;
+  const totalAmountCents = ticketPriceCents * quantity;
+  const platformFeeCents = calculatePlatformFee(totalAmountCents);
+  const hostAmountCents = totalAmountCents - platformFeeCents;
 
-    if (!hostUser.stripe_connect_id || !hostUser.connect_onboarding_complete) {
-      return res.status(400).json({ 
-        error: { message: 'Host payment setup incomplete' } 
-      });
-    }
+  console.log(`Payment calculation: Total: ${totalAmountCents}¢, Platform Fee: ${platformFeeCents}¢, Host: ${hostAmountCents}¢`);
 
-    // Calculate amounts
-    const ticketPriceCents = event.price_cents;
-    const totalAmountCents = ticketPriceCents * quantity;
-    const platformFeeCents = calculatePlatformFee(totalAmountCents);
-    const hostAmountCents = totalAmountCents - platformFeeCents;
+  // Find or create buyer
+  let buyer = await findUserByEmail(buyer_email);
+  if (!buyer) {
+    const [firstName, ...lastNameParts] = (buyer_name || '').split(' ');
+    buyer = await createUser({
+      email: buyer_email,
+      role: 'buyer',
+      first_name: firstName || undefined,
+      last_name: lastNameParts.join(' ') || undefined,
+      firebase_uid: req.user?.uid
+    });
+    console.log(`Created new buyer user: ${buyer.id}`);
+  }
 
-    console.log(`Payment calculation: Total: ${totalAmountCents}¢, Platform Fee: ${platformFeeCents}¢, Host: ${hostAmountCents}¢`);
-
-    // Find or create buyer
-    let buyer = await findUserByEmail(buyer_email);
-    if (!buyer) {
-      const [firstName, ...lastNameParts] = (buyer_name || '').split(' ');
-      buyer = await createUser({
-        email: buyer_email,
-        role: 'buyer',
-        first_name: firstName || undefined,
-        last_name: lastNameParts.join(' ') || undefined
-      });
-      console.log(`Created new buyer user: ${buyer.id}`);
-    }
-
-    // Create or get Stripe customer
-    let stripeCustomer;
-    if (buyer.stripe_customer_id) {
-      try {
-        // Verify customer exists in Stripe
-        stripeCustomer = await getOrCreateCustomer(buyer_email, buyer_name);
-        if (stripeCustomer.id !== buyer.stripe_customer_id) {
-          // Update if different customer returned
-          await updateUser(buyer.id, { stripe_customer_id: stripeCustomer.id });
-        }
-      } catch (error) {
-        console.log('Existing customer not found, creating new one');
-        stripeCustomer = await getOrCreateCustomer(buyer_email, buyer_name);
+  // Create or get Stripe customer
+  let stripeCustomer;
+  if (buyer.stripe_customer_id) {
+    try {
+      // Verify customer exists in Stripe
+      stripeCustomer = await getOrCreateCustomer(buyer_email, buyer_name);
+      if (stripeCustomer.id !== buyer.stripe_customer_id) {
+        // Update if different customer returned
         await updateUser(buyer.id, { stripe_customer_id: stripeCustomer.id });
       }
-    } else {
+    } catch (error) {
+      console.log('Existing customer not found, creating new one');
       stripeCustomer = await getOrCreateCustomer(buyer_email, buyer_name);
       await updateUser(buyer.id, { stripe_customer_id: stripeCustomer.id });
     }
+  } else {
+    stripeCustomer = await getOrCreateCustomer(buyer_email, buyer_name);
+    await updateUser(buyer.id, { stripe_customer_id: stripeCustomer.id });
+  }
 
-    // Create PaymentIntent with destination charge
-    const paymentIntent = await createPaymentIntentWithDestination({
-      amount: totalAmountCents,
-      currency: currency,
-      destinationAccountId: hostUser.stripe_connect_id,
-      platformFeeAmount: platformFeeCents,
-      customerId: stripeCustomer.id,
-      metadata: {
-        event_id: event_id.toString(),
-        event_title: event.title,
-        buyer_email: buyer_email,
-        buyer_name: buyer_name || '',
-        quantity: quantity.toString(),
-        ticket_price_cents: ticketPriceCents.toString(),
-        platform_fee_cents: platformFeeCents.toString(),
-        host_amount_cents: hostAmountCents.toString()
-      }
-    });
+  // Create PaymentIntent with destination charge
+  const paymentIntent = await createPaymentIntentWithDestination({
+    amount: totalAmountCents,
+    currency: currency,
+    destinationAccountId: hostUser.stripe_connect_id,
+    platformFeeAmount: platformFeeCents,
+    customerId: stripeCustomer.id,
+    metadata: {
+      event_id: event_id.toString(),
+      event_title: event.title,
+      buyer_email: buyer_email,
+      buyer_name: buyer_name || '',
+      quantity: quantity.toString(),
+      ticket_price_cents: ticketPriceCents.toString(),
+      platform_fee_cents: platformFeeCents.toString(),
+      host_amount_cents: hostAmountCents.toString()
+    }
+  });
+
+  // RACE CONDITION FIX: Create order and update capacity in transaction
+  const db = getDatabase();
+  const client = await db.connect();
+  let order;
+  try {
+    await client.query('BEGIN');
+    
+    // Lock event row and check capacity
+    const eventResult = await client.query(
+      'SELECT tickets_sold, capacity FROM events WHERE id = $1 FOR UPDATE',
+      [event_id]
+    );
+    
+    const currentEvent = eventResult.rows[0];
+    if (currentEvent.tickets_sold + quantity > currentEvent.capacity) {
+      await client.query('ROLLBACK');
+      throw new ApiError(400, 'Bad Request', 'Not enough tickets available');
+    }
 
     // Create order record
-    const order = await createOrder({
-      buyer_id: buyer.id,
-      event_id: event_id,
-      quantity: quantity,
-      amount_cents: totalAmountCents,
-      platform_fee_cents: platformFeeCents,
-      host_amount_cents: hostAmountCents,
-      currency: currency,
-      stripe_payment_intent_id: paymentIntent.id,
-      buyer_email: buyer_email,
-      buyer_name: buyer_name
-    });
+    const orderResult = await client.query(`
+      INSERT INTO orders (
+        buyer_id, event_id, quantity, amount_cents, platform_fee_cents, 
+        host_amount_cents, currency, stripe_payment_intent_id, 
+        buyer_email, buyer_name, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
+      RETURNING *
+    `, [
+      buyer.id, event_id, quantity, totalAmountCents, platformFeeCents,
+      hostAmountCents, currency, paymentIntent.id, buyer_email, buyer_name
+    ]);
+    order = orderResult.rows[0];
 
-    // Create ephemeral key for PaymentSheet
-    const ephemeralKey = await createEphemeralKey(stripeCustomer.id);
+    // Update tickets_sold
+    await client.query(
+      'UPDATE events SET tickets_sold = tickets_sold + $1 WHERE id = $2',
+      [quantity, event_id]
+    );
 
-    // Return configuration for PaymentSheet
-    res.json({
-      success: true,
-      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
-      paymentIntentClientSecret: paymentIntent.client_secret,
-      ephemeralKey: ephemeralKey.secret,
-      customer: stripeCustomer.id,
-      order_id: order.id,
-      event: {
-        id: event.id,
-        title: event.title,
-        venue: event.venue,
-        starts_at: event.starts_at,
-        price_cents: ticketPriceCents
-      },
-      order_summary: {
-        quantity: quantity,
-        ticket_price_cents: ticketPriceCents,
-        total_amount_cents: totalAmountCents,
-        platform_fee_cents: platformFeeCents,
-        currency: currency
-      }
-    });
-
-    console.log(`Created PaymentIntent: ${paymentIntent.id} for order: ${order.id}`);
-
+    await client.query('COMMIT');
   } catch (error) {
-    console.error('Payment intent creation error:', error);
-    
-    if (isStripeError(error)) {
-      const { message, statusCode } = handleStripeError(error);
-      return res.status(statusCode).json({ error: { message } });
-    }
-    
-    res.status(500).json({ 
-      error: { message: 'Internal server error' } 
-    });
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
-});
+
+  // Create ephemeral key for PaymentSheet
+  const ephemeralKey = await createEphemeralKey(stripeCustomer.id);
+
+  // Return configuration for PaymentSheet
+  res.json({
+    success: true,
+    publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+    paymentIntentClientSecret: paymentIntent.client_secret,
+    ephemeralKey: ephemeralKey.secret,
+    customer: stripeCustomer.id,
+    order_id: order.id,
+    event: {
+      id: event.id,
+      title: event.title,
+      venue: event.venue,
+      starts_at: event.starts_at,
+      price_cents: ticketPriceCents
+    },
+    order_summary: {
+      quantity: quantity,
+      ticket_price_cents: ticketPriceCents,
+      total_amount_cents: totalAmountCents,
+      platform_fee_cents: platformFeeCents,
+      currency: currency
+    }
+  });
+
+  console.log(`Created PaymentIntent: ${paymentIntent.id} for order: ${order.id}`);
+}));
 
 // GET /payments/config
 // Get publishable key and other config for PaymentSheet
@@ -212,106 +214,88 @@ paymentRoutes.get('/config', async (req: Request, res: Response) => {
 
 // POST /payments/customer
 // Create or retrieve Stripe customer (for standalone customer creation)
-paymentRoutes.post('/customer', async (req: Request, res: Response) => {
-  try {
-    const { email, name } = req.body;
+paymentRoutes.post('/customer', requireAuth, validateSchema(customerCreateSchema), asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { email, name } = req.body;
 
-    if (!email) {
-      return res.status(400).json({ 
-        error: { message: 'Email is required' } 
-      });
-    }
-
-    const customer = await getOrCreateCustomer(email, name);
-    
-    // Find or create user record
-    let user = await findUserByEmail(email);
-    if (!user) {
-      const [firstName, ...lastNameParts] = (name || '').split(' ');
-      user = await createUser({
-        email,
-        role: 'buyer',
-        first_name: firstName || undefined,
-        last_name: lastNameParts.join(' ') || undefined,
-        stripe_customer_id: customer.id
-      });
-    } else if (!user.stripe_customer_id) {
-      await updateUser(user.id, { stripe_customer_id: customer.id });
-    }
-
-    res.json({
-      success: true,
-      customer: {
-        id: customer.id,
-        email: customer.email,
-        name: customer.name
-      }
-    });
-
-  } catch (error) {
-    console.error('Customer creation error:', error);
-    
-    if (isStripeError(error)) {
-      const { message, statusCode } = handleStripeError(error);
-      return res.status(statusCode).json({ error: { message } });
-    }
-    
-    res.status(500).json({ 
-      error: { message: 'Internal server error' } 
-    });
+  // SECURITY: Verify authenticated user email matches request email
+  if (req.user?.email && email !== req.user.email) {
+    throw new ApiError(403, 'Forbidden', 'Email must match authenticated user');
   }
-});
+
+  const customer = await getOrCreateCustomer(email, name);
+  
+  // Find or create user record
+  let user = await findUserByEmail(email);
+  if (!user) {
+    const [firstName, ...lastNameParts] = (name || '').split(' ');
+    user = await createUser({
+      email,
+      role: 'buyer',
+      first_name: firstName || undefined,
+      last_name: lastNameParts.join(' ') || undefined,
+      stripe_customer_id: customer.id,
+      firebase_uid: req.user?.uid
+    });
+  } else if (!user.stripe_customer_id) {
+    await updateUser(user.id, { stripe_customer_id: customer.id });
+  }
+
+  res.json({
+    success: true,
+    customer: {
+      id: customer.id,
+      email: customer.email,
+      name: customer.name
+    }
+  });
+}));
 
 // GET /payments/order/:order_id
 // Get order details
-paymentRoutes.get('/order/:order_id', async (req: Request, res: Response) => {
-  try {
-    const { order_id } = req.params;
-    
-    const db = getDatabase();
-    const result = await db.query(`
-      SELECT o.*, e.title as event_title, e.venue, e.starts_at, e.address
-      FROM orders o
-      JOIN events e ON o.event_id = e.id
-      WHERE o.id = $1
-    `, [order_id]);
+paymentRoutes.get('/order/:order_id', requireAuth, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { order_id } = req.params;
+  
+  const db = getDatabase();
+  const result = await db.query(`
+    SELECT o.*, e.title as event_title, e.venue, e.starts_at, e.address
+    FROM orders o
+    JOIN events e ON o.event_id = e.id
+    WHERE o.id = $1
+  `, [order_id]);
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ 
-        error: { message: 'Order not found' } 
-      });
-    }
-
-    const order = result.rows[0];
-
-    res.json({
-      success: true,
-      order: {
-        id: order.id,
-        status: order.status,
-        quantity: order.quantity,
-        amount_cents: order.amount_cents,
-        platform_fee_cents: order.platform_fee_cents,
-        currency: order.currency,
-        buyer_email: order.buyer_email,
-        buyer_name: order.buyer_name,
-        created_at: order.created_at,
-        event: {
-          title: order.event_title,
-          venue: order.venue,
-          starts_at: order.starts_at,
-          address: order.address
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error('Order retrieval error:', error);
-    res.status(500).json({ 
-      error: { message: 'Internal server error' } 
-    });
+  if (result.rows.length === 0) {
+    throw new ApiError(404, 'Not Found', 'Order not found');
   }
-});
+
+  const order = result.rows[0];
+
+  // SECURITY: Verify user owns this order
+  const buyer = await findUserByEmail(order.buyer_email);
+  if (!buyer || (req.user?.uid !== buyer.firebase_uid && req.user?.email !== buyer.email)) {
+    throw new ApiError(403, 'Forbidden', 'Cannot access another user\'s order');
+  }
+
+  res.json({
+    success: true,
+    order: {
+      id: order.id,
+      status: order.status,
+      quantity: order.quantity,
+      amount_cents: order.amount_cents,
+      platform_fee_cents: order.platform_fee_cents,
+      currency: order.currency,
+      buyer_email: order.buyer_email,
+      buyer_name: order.buyer_name,
+      created_at: order.created_at,
+      event: {
+        title: order.event_title,
+        venue: order.venue,
+        starts_at: order.starts_at,
+        address: order.address
+      }
+    }
+  });
+}));
 
 // GET /payments/invoice/:payment_intent_id
 // Get invoice details for a payment intent

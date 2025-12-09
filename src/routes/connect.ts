@@ -16,8 +16,12 @@ import {
   findUsersByEmailCaseInsensitive,
   findUsersWithStripeConnectId
 } from '../database';
+import { requireAuth, AuthRequest } from '../middleware/auth';
+import { validateSchema, connectOnboardSchema } from '../middleware/schemaValidation';
+import { ApiError } from '../utils/errors';
+import { asyncHandler } from '../utils/asyncHandler';
 
-export const connectRoutes = Router();
+export const connectRoutes: ReturnType<typeof Router> = Router();
 
 // Helper function to create or retrieve existing Stripe Connect account
 async function createOrRetrieveStripeAccount(email: string, userId: number): Promise<string> {
@@ -66,43 +70,35 @@ async function createOrRetrieveStripeAccount(email: string, userId: number): Pro
 
 // POST /connect/onboard-link
 // Create or return existing Connect account onboarding link
-connectRoutes.post('/onboard-link', async (req: Request, res: Response) => {
-  try {
-    const { email, first_name, last_name, refresh_url, return_url } = req.body;
+connectRoutes.post('/onboard-link', requireAuth, validateSchema(connectOnboardSchema), asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { email, first_name, last_name, refresh_url, return_url } = req.body;
 
-    // Validate required fields
-    if (!email) {
-      return res.status(400).json({ 
-        error: { message: 'Email is required' } 
-      });
-    }
+  // SECURITY: Verify authenticated user email matches request email
+  if (!req.user?.email || email.toLowerCase() !== req.user.email.toLowerCase()) {
+    throw new ApiError(403, 'Forbidden', 'Email must match authenticated user');
+  }
 
-    if (!return_url) {
-      return res.status(400).json({ 
-        error: { message: 'return_url is required' } 
-      });
-    }
+  const refreshUrl = refresh_url || `${process.env.APP_URL}/connect/refresh`;
 
-    const refreshUrl = refresh_url || `${process.env.APP_URL}/connect/refresh`;
+  console.log(`Creating Connect onboarding for: ${email}`);
 
-    console.log(`Creating Connect onboarding for: ${email}`);
-
-    // Find or create user
-    let user = await findUserByEmail(email);
-    
-    if (!user) {
-      // Create new user as host
-      user = await createUser({
-        email,
-        role: 'host',
-        first_name,
-        last_name
-      });
-      console.log(`Created new host user: ${user.id}`);
-    } else if (user.role !== 'host') {
-      // Update role to host if needed
-      user = await updateUser(user.id, { role: 'host' });
-    }
+  // Find or create user
+  let user = await findUserByEmail(email);
+  
+  if (!user) {
+    // Create new user as host
+    user = await createUser({
+      email,
+      role: 'host',
+      first_name,
+      last_name,
+      firebase_uid: req.user?.uid
+    });
+    console.log(`Created new host user: ${user.id}`);
+  } else if (user.role !== 'host') {
+    // Update role to host if needed
+    user = await updateUser(user.id, { role: 'host' });
+  }
 
     let stripeAccountId = user.stripe_connect_id;
 
@@ -220,20 +216,12 @@ connectRoutes.post('/onboard-link', async (req: Request, res: Response) => {
       
       if (isStripeError(error)) {
         const { message, statusCode } = handleStripeError(error);
-        return res.status(statusCode).json({ error: { message } });
+        throw new ApiError(statusCode, 'Stripe Error', message);
       }
       
-      return res.status(500).json({ 
-        error: { message: 'Failed to create onboarding link' } 
-      });
+      throw new ApiError(500, 'Internal Server Error', 'Failed to create onboarding link');
     }
-  } catch (error) {
-    console.error('Connect onboarding error:', error);
-    return res.status(500).json({ 
-      error: { message: 'Internal server error' } 
-    });
-  }
-});
+}));
 
 // GET /connect/return
 // Handle successful Connect onboarding return
@@ -465,22 +453,22 @@ connectRoutes.get('/status/:email', async (req: Request, res: Response) => {
 
 // POST /connect/disconnect
 // Disconnect Stripe Connect account
-connectRoutes.post('/disconnect', async (req: Request, res: Response) => {
-  try {
-    const { email } = req.body;
-    
-    if (!email) {
-      return res.status(400).json({ 
-        error: { message: 'Email is required' } 
-      });
-    }
-    
-    const user = await findUserByEmail(email);
-    if (!user) {
-      return res.status(404).json({ 
-        error: { message: 'User not found' } 
-      });
-    }
+connectRoutes.post('/disconnect', requireAuth, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { email } = req.body;
+  
+  if (!email) {
+    throw new ApiError(400, 'Bad Request', 'Email is required');
+  }
+
+  // SECURITY: Verify authenticated user email matches request email
+  if (!req.user?.email || email.toLowerCase() !== req.user.email.toLowerCase()) {
+    throw new ApiError(403, 'Forbidden', 'Email must match authenticated user');
+  }
+  
+  const user = await findUserByEmail(email);
+  if (!user) {
+    throw new ApiError(404, 'Not Found', 'User not found');
+  }
     
     console.log(`Disconnecting Stripe Connect account for user: ${email} (ID: ${user.id})`);
     console.log(`Current user data: role=${user.role}, stripe_connect_id=${user.stripe_connect_id}, onboarding_complete=${user.connect_onboarding_complete}`);
@@ -500,83 +488,59 @@ connectRoutes.post('/disconnect', async (req: Request, res: Response) => {
     console.log('Updating user with data:', updateData);
     await updateUser(user.id, updateData);
     
-    console.log(`Successfully disconnected Stripe Connect account for user: ${email}. Stored previous ID: ${previousConnectId}`);
-    
-    return res.json({
-      success: true,
-      message: 'Stripe Connect account disconnected successfully'
-    });
-    
-  } catch (error) {
-    console.error('Connect disconnect error:', error);
-    return res.status(500).json({ 
-      error: { message: 'Internal server error' } 
-    });
-  }
-});
+  console.log(`Successfully disconnected Stripe Connect account for user: ${email}. Stored previous ID: ${previousConnectId}`);
+  
+  return res.json({
+    success: true,
+    message: 'Stripe Connect account disconnected successfully'
+  });
+}));
 
 // POST /connect/dashboard-link
 // Create login link for Stripe Connect dashboard
-connectRoutes.post('/dashboard-link', async (req: Request, res: Response) => {
-  try {
-    const { email, account_id } = req.body;
-    
-    if (!email && !account_id) {
-      return res.status(400).json({ 
-        error: { message: 'Email or account_id is required' } 
-      });
-    }
-    
-    let stripeAccountId = account_id;
-    
-    // If no account_id provided, look up by email
-    if (!stripeAccountId && email) {
-      const user = await findUserByEmail(email);
-      if (!user) {
-        return res.status(404).json({ 
-          error: { message: 'User not found' } 
-        });
-      }
-      
-      if (!user.stripe_connect_id) {
-        return res.status(400).json({ 
-          error: { message: 'User does not have a Connect account' } 
-        });
-      }
-      
-      stripeAccountId = user.stripe_connect_id;
-    }
-    
-    // Verify the account exists and onboarding is complete
-    const onboardingComplete = await isAccountOnboardingComplete(stripeAccountId);
-    
-    if (!onboardingComplete) {
-      return res.status(400).json({ 
-        error: { message: 'Connect account onboarding is not complete' } 
-      });
-    }
-    
-    console.log(`Creating dashboard link for account: ${stripeAccountId}`);
-    
-    // Create the dashboard login link
-    const loginLink = await createDashboardLink(stripeAccountId);
-    
-    return res.json({
-      success: true,
-      url: loginLink.url,
-      created: loginLink.created
-    });
-    
-  } catch (error) {
-    console.error('Dashboard link error:', error);
-    
-    if (isStripeError(error)) {
-      const { message, statusCode } = handleStripeError(error);
-      return res.status(statusCode).json({ error: { message } });
-    }
-    
-    return res.status(500).json({ 
-      error: { message: 'Internal server error' } 
-    });
+connectRoutes.post('/dashboard-link', requireAuth, asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { email, account_id } = req.body;
+  
+  if (!email && !account_id) {
+    throw new ApiError(400, 'Bad Request', 'Email or account_id is required');
   }
-});
+
+  // SECURITY: Verify authenticated user email matches request email (if provided)
+  if (email && req.user?.email && email.toLowerCase() !== req.user.email.toLowerCase()) {
+    throw new ApiError(403, 'Forbidden', 'Email must match authenticated user');
+  }
+  
+  let stripeAccountId = account_id;
+  
+  // If no account_id provided, look up by email
+  if (!stripeAccountId && email) {
+    const user = await findUserByEmail(email);
+    if (!user) {
+      throw new ApiError(404, 'Not Found', 'User not found');
+    }
+    
+    if (!user.stripe_connect_id) {
+      throw new ApiError(400, 'Bad Request', 'User does not have a Connect account');
+    }
+    
+    stripeAccountId = user.stripe_connect_id;
+  }
+    
+  // Verify the account exists and onboarding is complete
+  const onboardingComplete = await isAccountOnboardingComplete(stripeAccountId);
+  
+  if (!onboardingComplete) {
+    throw new ApiError(400, 'Bad Request', 'Connect account onboarding is not complete');
+  }
+  
+  console.log(`Creating dashboard link for account: ${stripeAccountId}`);
+  
+  // Create the dashboard login link
+  const loginLink = await createDashboardLink(stripeAccountId);
+  
+  return res.json({
+    success: true,
+    url: loginLink.url,
+    created: loginLink.created
+  });
+}));

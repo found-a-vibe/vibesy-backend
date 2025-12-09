@@ -16,7 +16,7 @@ import {
   firestore
 } from '../database';
 
-export const reservationPaymentRoutes = Router();
+export const reservationPaymentRoutes: ReturnType<typeof Router> = Router();
 
 // Helper function to get host information from UUID event
 async function getHostInfoFromUUIDEvent(eventId: string) {

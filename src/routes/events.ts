@@ -5,7 +5,7 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { ApiError } from '../utils/errors';
 import moment from 'moment-timezone';
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 interface FetchEventsResponse {
   status: string;
