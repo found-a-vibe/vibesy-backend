@@ -7,6 +7,8 @@ import { ApiError } from '../utils/errors';
  */
 export const validateSchema = (schema: Joi.ObjectSchema, property: 'body' | 'query' | 'params' = 'body') => {
   return (req: Request, res: Response, next: NextFunction): void => {
+    console.log(`Validating ${property}:`, JSON.stringify(req[property], null, 2));
+    
     const { error, value } = schema.validate(req[property], {
       abortEarly: false, // Report all validation errors
       stripUnknown: true, // Remove unknown keys
@@ -14,6 +16,8 @@ export const validateSchema = (schema: Joi.ObjectSchema, property: 'body' | 'que
 
     if (error) {
       const errorMessage = error.details.map(detail => detail.message).join(', ');
+      console.error(`Validation failed for ${property}:`, errorMessage);
+      console.error('Failed fields:', error.details.map(d => d.path.join('.')));
       return next(new ApiError(400, 'Validation Error', errorMessage));
     }
 
