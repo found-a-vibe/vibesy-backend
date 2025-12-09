@@ -54,10 +54,8 @@ export const validateEnv = (): void => {
   }
 
   // Validate formats
-  if (process.env.PG_HOST && !isValidHostname(process.env.PG_HOST)) {
-    errors.push('PG_HOST must be a valid hostname or IP address');
-  }
-
+  // Skip PG_HOST validation - cloud providers use various formats
+  
   if (process.env.PG_PORT && !isValidPort(process.env.PG_PORT)) {
     errors.push('PG_PORT must be a valid port number (1-65535)');
   }
