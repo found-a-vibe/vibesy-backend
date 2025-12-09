@@ -26,16 +26,17 @@ export const validateEnv = (): void => {
     'STRIPE_PUBLISHABLE_KEY': 'Stripe publishable key',
     'STRIPE_WEBHOOK_SECRET': 'Stripe webhook secret',
     
-    // Firebase
-    'FIREBASE_SERVICE_ACCOUNT_PATH': 'Firebase service account JSON path',
+    // Firebase (uses GOOGLE_APPLICATION_CREDENTIALS, not FIREBASE_SERVICE_ACCOUNT_PATH)
+    'GOOGLE_APPLICATION_CREDENTIALS': 'Firebase service account JSON path',
     
     // SendGrid
     'SENDGRID_API_KEY': 'SendGrid API key',
-    'SENDGRID_FROM_EMAIL': 'SendGrid from email address',
+    // Accept either FROM_EMAIL or SENDGRID_FROM_EMAIL
+    // Note: Validation will check if at least one is set below
     
     // Application
     'APP_URL': 'Application URL',
-    'RETURN_URL': 'Stripe Connect return URL',
+    'RETURN_URL_SCHEME': 'Stripe Connect return URL',
     'REFRESH_URL': 'Stripe Connect refresh URL',
   };
 
@@ -44,6 +45,12 @@ export const validateEnv = (): void => {
     if (!process.env[key] || process.env[key]!.trim() === '') {
       errors.push(`Missing required environment variable: ${key} (${description})`);
     }
+  }
+  
+  // Special check: Accept either FROM_EMAIL or SENDGRID_FROM_EMAIL
+  if ((!process.env.FROM_EMAIL || process.env.FROM_EMAIL.trim() === '') && 
+      (!process.env.SENDGRID_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL.trim() === '')) {
+    errors.push('Missing required environment variable: FROM_EMAIL or SENDGRID_FROM_EMAIL (SendGrid from email address)');
   }
 
   // Validate formats
@@ -83,8 +90,8 @@ export const validateEnv = (): void => {
     errors.push('APP_URL must be a valid URL');
   }
 
-  if (process.env.RETURN_URL && !isValidUrl(process.env.RETURN_URL)) {
-    errors.push('RETURN_URL must be a valid URL');
+  if (process.env.RETURN_URL_SCHEME && !isValidUrl(process.env.RETURN_URL_SCHEME)) {
+    errors.push('RETURN_URL_SCHEME must be a valid URL');
   }
 
   if (process.env.REFRESH_URL && !isValidUrl(process.env.REFRESH_URL)) {
@@ -150,9 +157,10 @@ export const validateEnv = (): void => {
 
 // Validation helper functions
 function isValidHostname(hostname: string): boolean {
-  // Allow localhost, IP addresses, and domain names
-  const hostnameRegex = /^(localhost|(\d{1,3}\.){3}\d{1,3}|([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.[a-zA-Z]{2,})$/;
-  return hostnameRegex.test(hostname);
+  // Allow localhost, IP addresses, domain names, and cloud provider hostnames (e.g., Render.com format)
+  // Render.com format: dpg-xxxxx-a or similar with hyphens and alphanumeric
+  const hostnameRegex = /^(localhost|(\d{1,3}\.){3}\d{1,3}|([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.[a-zA-Z]{2,}|[a-zA-Z0-9-]+)$/;
+  return hostnameRegex.test(hostname) && hostname.length > 0;
 }
 
 function isValidPort(port: string): boolean {
