@@ -29,7 +29,7 @@ export const globalLimiter = rateLimit({
  * Prevents brute force attacks on OTP verification and email spam
  */
 export const otpLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
+  windowMs: 5 * 60 * 1000, // 5 minutes
   max: 5, // Max 5 OTP requests per hour per IP
   message: {
     success: false,

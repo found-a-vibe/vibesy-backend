@@ -25,7 +25,7 @@ interface OTPResponse {
   data?: {
     email: string;
     uid?: string;
-    expires_at?: Date;
+    expiry?: Date;
   };
 }
 
@@ -44,7 +44,8 @@ const sendOTPHandler = asyncHandler(async (req: Request, res: Response) => {
     description: `One-time passcode sent to ${email}`,
     data: {
       email,
-      expires_at: otpData.expiresAt
+      uid: (req as any).uid,
+      expiry: otpData.expiresAt
     }
   };
 
@@ -69,7 +70,7 @@ const verifyOTPHandler = asyncHandler(async (req: Request, res: Response) => {
     description: 'One-time passcode successfully verified',
     data: {
       email,
-      uid: (req as any).uid // From middleware if available
+      uid: (req as any).uid
     }
   };
 

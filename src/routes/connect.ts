@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { 
   createExpressAccount, 
-  findExistingExpressAccount,
   createAccountLink, 
   isAccountOnboardingComplete,
   createDashboardLink,
@@ -13,8 +12,6 @@ import {
   createUser,      
   updateUser,
   findUserByStripeConnectId,
-  findUsersByEmailCaseInsensitive,
-  findUsersWithStripeConnectId
 } from '../database';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { validateSchema, connectOnboardSchema } from '../middleware/schemaValidation';

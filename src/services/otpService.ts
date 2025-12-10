@@ -16,7 +16,7 @@ interface OTPResult {
 class OTPService {
   private readonly DEFAULT_EXPIRY_MINUTES = 5;
   private readonly MAX_ATTEMPTS = 3;
-  private readonly OTP_LENGTH = 6;
+  private readonly OTP_LENGTH = 4;
 
   /**
    * Generate a secure OTP and store it in Redis

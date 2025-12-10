@@ -1,21 +1,51 @@
+version: '3.9'
+
 services:
   postgres:
     image: postgres:16
-    container_name: vibesy-postgres
+    container_name: vibesy_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: vibesy_db
-      POSTGRES_USER: vibesy_user
-      POSTGRES_PASSWORD: vibesy_pass
+      POSTGRES_DB: vibesydb
+      POSTGRES_USER: vibesydb_user
+      POSTGRES_PASSWORD: QEGYZPjWAvR3WdtbLAG5yC6XFsOGMSuD
     ports:
       - "5432:5432"
     volumes:
       - vibesy_pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vibesy_user -d vibesy_db || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U vibesydb_user -d vibesydb || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: vibesy_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - vibesy_redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # OPTIONAL: API service example (add if you want)
+  # api:
+  #   build: .
+  #   environment:
+  #     REDIS_URL: redis://redis:6379
+  #     DATABASE_URL: postgres://vibesydb_user:QEGYZPjWAvR3WdtbLAG5yC6XFsOGMSuD@postgres:5432/vibesydb
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+
 volumes:
   vibesy_pg_data:
+  vibesy_redis_data:

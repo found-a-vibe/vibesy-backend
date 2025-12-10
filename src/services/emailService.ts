@@ -1,7 +1,7 @@
-import sgMail from '@sendgrid/mail';
-import { readFileSync } from 'fs';
-import { join } from 'path';
-import { ApiError } from '../utils/errors';
+import { readFileSync } from "fs";
+import { join } from "path";
+import { ApiError } from "../utils/errors";
+import { google } from "googleapis";
 
 interface EmailMessage {
   to: string;
@@ -26,78 +26,119 @@ interface EmailResponse {
 
 class EmailService {
   private initialized = false;
+  private oAuth2Client: any;
   private defaultFrom: string;
 
   constructor() {
     this.initialize();
-    this.defaultFrom = process.env.FROM_EMAIL || 'noreply@foundavibe.com';
+    this.defaultFrom = process.env.FROM_EMAIL || "noreply@foundavibe.com";
   }
 
   private initialize(): void {
-    const apiKey = process.env.SENDGRID_API_KEY;
-    if (!apiKey) {
-      throw new Error('SENDGRID_API_KEY environment variable is required');
+    const requiredEnvVars = [
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+      "GOOGLE_REFRESH_TOKEN",
+    ];
+    const missingEnvVars = requiredEnvVars.filter((key) => !process.env[key]);
+
+    if (missingEnvVars.length > 0) {
+      throw new Error(
+        `Missing required environment variables: ${missingEnvVars.join(", ")}`
+      );
     }
 
-    sgMail.setApiKey(apiKey);
+    const oAuth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      "https://developers.google.com/oauthplayground"
+    );
+
+    oAuth2Client.setCredentials({
+      refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+    });
+
+    this.oAuth2Client = oAuth2Client;
     this.initialized = true;
-    console.log('SendGrid email service initialized');
+    console.log("Google email service initialized");
   }
 
   async sendEmail(message: EmailMessage): Promise<EmailResponse> {
     if (!this.initialized) {
-      throw new ApiError(500, 'Email Service Error', 'Email service not initialized');
+      throw new ApiError(
+        500,
+        "Email Service Error",
+        "Email service not initialized"
+      );
     }
 
     try {
-      const emailMessage: sgMail.MailDataRequired = {
-        to: message.to,
-        from: message.from || this.defaultFrom,
-        subject: message.subject,
-        text: message.text,
-        html: message.html,
-        ...(message.templateId && {
-          templateId: message.templateId,
-          dynamicTemplateData: message.dynamicTemplateData
-        })
-      };
+      const emailContent = [
+        `To: ${message.to}`,
+        `From: ${message.from || this.defaultFrom}`,
+        `Subject: ${message.subject}`,
+        "Content-Type: text/html; charset=utf-8",
+        "",
+        // Prefer HTML if provided, otherwise fallback to text
+        message.html || `<pre>${message.text || ""}</pre>`,
+      ].join("\n");
 
-      const [response] = await sgMail.send(emailMessage);
-      
-      console.log(`Email sent successfully to ${message.to}:`, response.statusCode);
-      
+      const encodedMessage = Buffer.from(emailContent)
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+
+      const gmail = google.gmail({ version: "v1", auth: this.oAuth2Client });
+
+      const response = await gmail.users.messages.send({
+        userId: 'me',
+        requestBody: {
+          raw: encodedMessage,
+        },
+      });
+
+      console.log(
+        `Email sent successfully to ${message.to}:`,
+        response.statusText
+      );
+
       return {
         messageId: response.headers['x-message-id'] as string,
-        statusCode: response.statusCode
+        statusCode: response.status as number,
       };
     } catch (error) {
-      console.error('Error sending email:', error);
-      throw new ApiError(500, 'Email Service Error', 'Failed to send email');
+      console.error("Error sending email:", error);
+      throw new ApiError(500, "Email Service Error", "Failed to send email");
     }
   }
 
-  async sendOTPEmail(email: string, otp: string, recipientName?: string): Promise<EmailResponse> {
-    const templatePath = join(__dirname, '../templates/otp-email.html');
+  async sendOTPEmail(
+    email: string,
+    otp: string,
+    recipientName?: string
+  ): Promise<EmailResponse> {
+    const templatePath = join(__dirname, "../templates/otp-email.html");
     let htmlTemplate: string;
 
     try {
-      htmlTemplate = readFileSync(templatePath, 'utf8');
+      htmlTemplate = readFileSync(templatePath, "utf8");
     } catch (error) {
       // Fallback to simple HTML template if file doesn't exist
       htmlTemplate = this.getDefaultOTPTemplate();
     }
 
     const html = htmlTemplate
-      .replace('{{recipientName}}', recipientName || 'User')
-      .replace('{{otp}}', otp)
-      .replace('{{expiryMinutes}}', '5');
+      .replace("{{recipientName}}", recipientName || "User")
+      .replace("{{otp}}", otp)
+      .replace("{{expiryMinutes}}", "5");
 
     const message: EmailMessage = {
       to: email,
       from: this.defaultFrom,
-      subject: 'Your One-Time Password - FoundAVibe',
+      subject: "Your One-Time Password - FoundAVibe",
       text: `Your one-time password is: ${otp}. This code will expire in 5 minutes.`,
-      html
+      html,
     };
 
     return this.sendEmail(message);
@@ -107,13 +148,13 @@ class EmailService {
     const message: EmailMessage = {
       to: email,
       from: this.defaultFrom,
-      subject: 'Welcome to FoundAVibe!',
+      subject: "Welcome to FoundAVibe!",
       text: `Welcome ${name}! Thank you for joining FoundAVibe.`,
       html: `
         <h1>Welcome ${name}!</h1>
         <p>Thank you for joining FoundAVibe. We're excited to have you on board!</p>
         <p>Start exploring events in your area and connect with your community.</p>
-      `
+      `,
     };
 
     return this.sendEmail(message);
