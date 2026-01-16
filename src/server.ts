@@ -43,7 +43,8 @@ import { reservationsRoutes } from './routes/reservations';
 import { reservationPaymentRoutes } from './routes/reservationPayments';
 
 const app = express();
-const port = parseInt(process.env.SERVER_PORT || '4242');
+// Render uses PORT env var, fallback to SERVER_PORT for local dev
+const port = parseInt(process.env.PORT || process.env.SERVER_PORT || '4242');
 
 // Security: HTTPS redirect in production
 if (process.env.NODE_ENV === 'production') {
@@ -225,6 +226,12 @@ app.use('*', notFoundHandler);
 // Initialize database and start server
 async function startServer() {
   try {
+    log.info('Starting Vibesy Backend...', {
+      nodeVersion: process.version,
+      platform: process.platform,
+      environment: process.env.NODE_ENV || 'development'
+    });
+    
     log.info('Initializing database...');
     await initializeDatabase();
     log.info('Database initialized successfully');
@@ -234,12 +241,14 @@ async function startServer() {
     log.info('Job scheduler started successfully');
     
     const server = app.listen(port, '0.0.0.0', () => {
-      log.info('Vibesy API server running', {
+      log.info('✓ Vibesy API server running', {
+        nodeVersion: process.version,
         port,
-        healthCheck: `/health`,
-        readyCheck: `/ready`,
+        host: '0.0.0.0',
+        healthCheck: `http://0.0.0.0:${port}/health`,
+        readyCheck: `http://0.0.0.0:${port}/ready`,
         environment: process.env.NODE_ENV || 'development',
-        systemJobs: `/system/jobs`,
+        systemJobs: `http://0.0.0.0:${port}/system/jobs`,
       });
     });
 
