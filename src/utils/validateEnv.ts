@@ -29,6 +29,9 @@ export const validateEnv = (): void => {
     // Firebase (uses GOOGLE_APPLICATION_CREDENTIALS, not FIREBASE_SERVICE_ACCOUNT_PATH)
     'GOOGLE_APPLICATION_CREDENTIALS': 'Firebase service account JSON path',
     
+    // SendGrid
+    'SENDGRID_API_KEY': 'SendGrid API key for email delivery',
+    
     // Application
     'APP_URL': 'Application URL',
     'RETURN_URL_SCHEME': 'Stripe Connect return URL',

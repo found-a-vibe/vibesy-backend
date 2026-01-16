@@ -2,11 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config } from 'dotenv';
-import { initializeDatabase } from './database';
+import { initializeDatabase, closeDatabase, getDatabase } from './database';
 import { logRequest, logError } from './middleware/logger';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { requireAuth, requireAdmin, AuthRequest } from './middleware/auth';
 import { createErrorResponse, ApiError } from './utils/errors';
 import { jobScheduler } from './jobs/jobScheduler';
+import redisRepository from './repositories/redisRepository';
 import { validateEnv } from './utils/validateEnv';
 import { 
   globalLimiter, 
@@ -105,12 +107,52 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'stripe-signature'],
 }));
 
-// Health check endpoint (before JSON parsing for webhooks)
+// Health check endpoint (simple liveness check)
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Readiness check endpoint (verifies database connectivity)
+app.get('/ready', async (req, res) => {
+  const checks = {
+    postgres: { status: 'unknown' as 'ok' | 'error', message: '' },
+    redis: { status: 'unknown' as 'ok' | 'error', message: '' }
+  };
+  
+  let allHealthy = true;
+  
+  // Check PostgreSQL
+  try {
+    const db = getDatabase();
+    await db.query('SELECT 1');
+    checks.postgres.status = 'ok';
+    checks.postgres.message = 'Connected';
+  } catch (error: any) {
+    checks.postgres.status = 'error';
+    checks.postgres.message = error.message || 'Connection failed';
+    allHealthy = false;
+  }
+  
+  // Check Redis
+  try {
+    await redisRepository.ping();
+    checks.redis.status = 'ok';
+    checks.redis.message = 'Connected';
+  } catch (error: any) {
+    checks.redis.status = 'error';
+    checks.redis.message = error.message || 'Connection failed';
+    allHealthy = false;
+  }
+  
+  const statusCode = allHealthy ? 200 : 503;
+  res.status(statusCode).json({
+    status: allHealthy ? 'ready' : 'not_ready',
+    timestamp: new Date().toISOString(),
+    checks
   });
 });
 
@@ -148,12 +190,12 @@ app.use('/stripe', paymentIntentsRoutes);
 app.use('/reservations', reservationsRoutes);
 app.use('/reservation-payments', reservationPaymentRoutes);
 
-// Admin/system routes
-app.get('/system/jobs', (req, res) => {
+// Admin/system routes (protected)
+app.get('/system/jobs', requireAuth, requireAdmin, (req: AuthRequest, res) => {
   res.json(jobScheduler.getStatus());
 });
 
-app.post('/system/jobs/:jobName/run', async (req, res) => {
+app.post('/system/jobs/:jobName/run', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const { jobName } = req.params;
     const result = await jobScheduler.runJobNow(jobName);
@@ -206,6 +248,11 @@ async function startServer() {
       });
       
       await jobScheduler.shutdown();
+      console.log('🛑 Background jobs stopped');
+      
+      await closeDatabase();
+      console.log('🗄️  Database connections closed');
+      
       console.log('✅ Graceful shutdown complete');
       process.exit(0);
     };

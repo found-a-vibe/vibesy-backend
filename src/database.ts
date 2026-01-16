@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { adminService } from './services/adminService';
+import redisRepository from './repositories/redisRepository';
 
 // Export Firebase Firestore instance
 export const firestore = adminService.firestore();
@@ -200,6 +201,33 @@ export function getDatabase(): DatabaseConnection {
     throw new Error('Database not initialized. Call initializeDatabase() first.');
   }
   return dbConnection;
+}
+
+/**
+ * Close all database connections (PostgreSQL and Redis)
+ * Should be called during graceful shutdown
+ */
+export async function closeDatabase(): Promise<void> {
+  console.log('Closing database connections...');
+  
+  try {
+    // Close PostgreSQL connection pool
+    if (dbConnection) {
+      await dbConnection.close();
+      console.log('PostgreSQL connection closed');
+      dbConnection = null;
+    }
+  } catch (error) {
+    console.error('Error closing PostgreSQL connection:', error);
+  }
+  
+  try {
+    // Close Redis connection
+    await redisRepository.disconnect();
+    console.log('Redis connection closed');
+  } catch (error) {
+    console.error('Error closing Redis connection:', error);
+  }
 }
 
 // Utility functions for common database operations
