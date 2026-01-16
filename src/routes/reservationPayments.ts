@@ -320,7 +320,7 @@ reservationPaymentRoutes.post('/intent', async (req: Request, res: Response) => 
 
     // Return configuration for PaymentSheet (matching the iOS TicketPaymentIntentResponse format)
     
-    res.json({
+    return res.json({
       success: true,
       publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
       paymentIntentClientSecret: paymentIntent.client_secret,
@@ -351,7 +351,7 @@ reservationPaymentRoutes.post('/intent', async (req: Request, res: Response) => 
       return res.status(statusCode).json({ error: { message } });
     }
     
-    res.status(500).json({ 
+    return res.status(500).json({ 
       error: { message: 'Internal server error' } 
     });
   }

@@ -204,7 +204,7 @@ paymentRoutes.post('/intent', requireAuth, validateSchema(paymentIntentSchema), 
 
 // GET /payments/config
 // Get publishable key and other config for PaymentSheet
-paymentRoutes.get('/config', async (req: Request, res: Response) => {
+paymentRoutes.get('/config', (req, res) => {
   res.json({
     publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
     currency: 'usd',
@@ -299,9 +299,9 @@ paymentRoutes.get('/order/:order_id', requireAuth, asyncHandler(async (req: Auth
 
 // GET /payments/invoice/:payment_intent_id
 // Get invoice details for a payment intent
-paymentRoutes.get('/invoice/:payment_intent_id', async (req: Request, res: Response) => {
+paymentRoutes.get('/invoice/:payment_intent_id', (async (req: any, res: any) => {
   try {
-    const { payment_intent_id } = req.params;
+    const { payment_intent_id } = (req as any).params;
     
     if (!payment_intent_id || payment_intent_id.trim() === '') {
       return res.status(400).json({
@@ -357,7 +357,7 @@ paymentRoutes.get('/invoice/:payment_intent_id', async (req: Request, res: Respo
 
     console.log(`✅ Retrieved invoice details for: ${payment_intent_id}`);
 
-    res.json({
+    return res.json({
       success: true,
       invoice: invoice
     });
@@ -372,18 +372,18 @@ paymentRoutes.get('/invoice/:payment_intent_id', async (req: Request, res: Respo
       });
     }
     
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'
     });
   }
-});
+}) as any);
 
 // GET /payments/receipt/:payment_intent_id
 // Get payment receipt for a payment intent
-paymentRoutes.get('/receipt/:payment_intent_id', async (req: Request, res: Response) => {
+paymentRoutes.get('/receipt/:payment_intent_id', (async (req: any, res: any) => {
   try {
-    const { payment_intent_id } = req.params;
+    const { payment_intent_id } = (req as any).params;
     
     if (!payment_intent_id || payment_intent_id.trim() === '') {
       return res.status(400).json({
@@ -421,7 +421,7 @@ paymentRoutes.get('/receipt/:payment_intent_id', async (req: Request, res: Respo
 
     console.log(`✅ Retrieved payment receipt for: ${payment_intent_id}`);
 
-    res.json({
+    return res.json({
       success: true,
       receipt: receipt
     });
@@ -436,9 +436,9 @@ paymentRoutes.get('/receipt/:payment_intent_id', async (req: Request, res: Respo
       });
     }
     
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'
     });
   }
-});
+}) as any);

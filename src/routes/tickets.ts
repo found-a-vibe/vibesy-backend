@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import QRCode from 'qrcode';
 import { 
   findTicketByQRToken,
@@ -17,8 +17,8 @@ export const ticketRoutes: ReturnType<typeof Router> = Router();
 
 // GET /tickets/verify?token=...
 // Verify a ticket QR code
-ticketRoutes.get('/verify', validateSchema(ticketTokenQuerySchema, 'query'), asyncHandler(async (req: Request, res: Response) => {
-  const { token } = req.query as { token: string };
+ticketRoutes.get('/verify', validateSchema(ticketTokenQuerySchema, 'query'), asyncHandler(async (req, res: Response) => {
+  const { token } = (req as any).query as { token: string };
 
   console.log(`🔍 Verifying ticket with token: ${token.substring(0, 8)}...`);
 
@@ -177,9 +177,9 @@ ticketRoutes.post('/scan', requireAuth, validateSchema(ticketScanSchema), asyncH
 ticketRoutes.get('/qr/:token', 
   validateSchema(ticketTokenParamSchema, 'params'),
   validateSchema(qrSizeQuerySchema, 'query'),
-  asyncHandler(async (req: Request, res: Response) => {
-    const { token } = req.params;
-    const { size = 200 } = req.query as { size?: number };
+  asyncHandler(async (req, res: Response) => {
+    const { token } = (req as any).params;
+    const { size = 200 } = (req as any).query as { size?: number };
 
     // Validate ticket exists
     const ticket = await findTicketByQRToken(token);
@@ -207,7 +207,7 @@ ticketRoutes.get('/qr/:token',
 
 // GET /tickets/qr/:ticket_id/invoice
 // Get QR code data with invoice information for a ticket
-ticketRoutes.get('/qr/:ticket_id/invoice', async (req: Request, res: Response) => {
+ticketRoutes.get('/qr/:ticket_id/invoice', (async (req: Request, res: Response) => {
   try {
     const { ticket_id } = req.params;
     
@@ -288,15 +288,15 @@ ticketRoutes.get('/qr/:ticket_id/invoice', async (req: Request, res: Response) =
 
     console.log(`✅ Retrieved QR invoice data for ticket: ${ticket_id}`);
 
-    res.json(invoiceData);
+    return res.json(invoiceData);
   } catch (error: any) {
     console.error('QR invoice data retrieval error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'
     });
   }
-});
+}) as any);
 
 // GET /tickets/order/:order_id
 // Get all tickets for an order
@@ -438,7 +438,7 @@ ticketRoutes.get('/event/:event_id/stats', requireAuth, requireEventAccess, asyn
 
 // Debug endpoint - only available in development
 if (process.env.NODE_ENV === 'development') {
-  ticketRoutes.get('/debug/orders', async (req: Request, res: Response) => {
+  ticketRoutes.get('/debug/orders', (async (req: Request, res: Response) => {
     try {
       const db = getDatabase();
       const result = await db.query(`
@@ -466,5 +466,5 @@ if (process.env.NODE_ENV === 'development') {
         error: { message: 'Internal server error' } 
       });
     }
-  });
+  }) as any);
 }

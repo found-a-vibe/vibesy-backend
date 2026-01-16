@@ -42,7 +42,7 @@ webhookRoutes.post('/stripe', async (req: Request, res: Response) => {
     // Handle the event
     await handleWebhookEvent(event.type, event);
 
-    res.status(200).json({ received: true, handled: true });
+    return res.status(200).json({ received: true, handled: true });
 
   } catch (error) {
     console.error('Webhook processing error:', error);
@@ -167,17 +167,17 @@ async function handlePaymentSucceeded(event: any) {
 
       // Log ticket creation (sensitive QR tokens removed from logs)
       console.log(`🎫 Generated ${tickets.length} tickets with numbers: ${tickets.map(t => t.ticket_number).join(', ')}`);
+      
+      // TODO: Send confirmation email with tickets to buyer
+      // TODO: Send notification to host about sale
+      
+      console.log(`✅ Successfully processed payment for order ${order.id}`);
     } catch (txError) {
       await client.query('ROLLBACK');
       throw txError;
     } finally {
       client.release();
     }
-    
-    // TODO: Send confirmation email with tickets to buyer
-    // TODO: Send notification to host about sale
-    
-    console.log(`✅ Successfully processed payment for order ${order.id}`);
 
   } catch (error) {
     console.error('Error processing successful payment:', error);

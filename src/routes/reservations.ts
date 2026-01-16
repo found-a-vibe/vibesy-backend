@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import { body, query, param } from 'express-validator';
 import { FieldValue } from 'firebase-admin/firestore';
 import { firestore } from '../database';
@@ -18,7 +18,7 @@ reservationsRoutes.post('/', [
   body('quantity').isInt({ min: 1, max: 10 }).withMessage('Quantity must be between 1 and 10'),
   body('payment_intent_id').isString().notEmpty().withMessage('Payment intent ID is required'),
   body('status').isIn(['pending', 'confirmed', 'cancelled']).withMessage('Invalid status'),
-], validateRequest, async (req, res) => {
+], validateRequest, async (req: Request, res: Response) => {
   try {
     const {
       event_id,
@@ -39,7 +39,7 @@ reservationsRoutes.post('/', [
     // Verify the event exists
     const eventDoc = await firestore.collection('events').doc(event_id.toLowerCase()).get();
     if (!eventDoc.exists) {
-      throw new ApiError(404, 'Event not found');
+      throw new ApiError(404, 'Not Found', 'Event not found');
     }
 
     // Create reservation document
@@ -82,7 +82,7 @@ reservationsRoutes.post('/', [
       throw error;
     }
     
-    throw new ApiError(500, 'Failed to create reservation');
+    throw new ApiError(500, 'Internal Server Error', 'Failed to create reservation');
   }
 });
 
@@ -93,7 +93,7 @@ reservationsRoutes.get('/user/:userId', [
   param('userId').isString().notEmpty().withMessage('User ID is required'),
   query('status').optional().isIn(['pending', 'confirmed', 'cancelled']).withMessage('Invalid status filter'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
-], validateRequest, async (req, res) => {
+], validateRequest, async (req: Request, res: Response) => {
   try {
     const { userId } = req.params;
     const { status, limit = '20' } = req.query;
@@ -152,7 +152,7 @@ reservationsRoutes.get('/user/:userId', [
       throw error;
     }
     
-    throw new ApiError(500, 'Failed to get reservations');
+    throw new ApiError(500, 'Internal Server Error', 'Failed to get reservations');
   }
 });
 
@@ -163,7 +163,7 @@ reservationsRoutes.get('/event/:eventId', [
   param('eventId').isString().notEmpty().withMessage('Event ID is required'),
   query('status').optional().isIn(['pending', 'confirmed', 'cancelled']).withMessage('Invalid status filter'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
-], validateRequest, async (req, res) => {
+], validateRequest, async (req: Request, res: Response) => {
   try {
     const { eventId } = req.params;
     const { status, limit = '20' } = req.query;
@@ -198,7 +198,7 @@ reservationsRoutes.get('/event/:eventId', [
       throw error;
     }
     
-    throw new ApiError(500, 'Failed to get reservations');
+    throw new ApiError(500, 'Internal Server Error', 'Failed to get reservations');
   }
 });
 
@@ -208,7 +208,7 @@ reservationsRoutes.get('/event/:eventId', [
 reservationsRoutes.patch('/:reservationId', [
   param('reservationId').isString().notEmpty().withMessage('Reservation ID is required'),
   body('status').isIn(['pending', 'confirmed', 'cancelled']).withMessage('Invalid status'),
-], validateRequest, async (req, res) => {
+], validateRequest, async (req: Request, res: Response) => {
   try {
     const { reservationId } = req.params;
     const { status } = req.body;
@@ -219,7 +219,7 @@ reservationsRoutes.patch('/:reservationId', [
     const reservationDoc = await reservationRef.get();
 
     if (!reservationDoc.exists) {
-      throw new ApiError(404, 'Reservation not found');
+      throw new ApiError(404, 'Not Found', 'Reservation not found');
     }
 
     const updateData = {
@@ -235,7 +235,7 @@ reservationsRoutes.patch('/:reservationId', [
       if (reservationData?.event_id && reservationData?.user_id) {
         const eventRef = firestore.collection('events').doc(reservationData.event_id);
         await eventRef.update({
-          reservations: firestore.FieldValue.arrayRemove(reservationData.user_id),
+          reservations: FieldValue.arrayRemove(reservationData.user_id),
           updated_at: new Date().toISOString()
         });
       }
@@ -256,7 +256,7 @@ reservationsRoutes.patch('/:reservationId', [
       throw error;
     }
     
-    throw new ApiError(500, 'Failed to update reservation');
+    throw new ApiError(500, 'Internal Server Error', 'Failed to update reservation');
   }
 });
 
@@ -265,7 +265,7 @@ reservationsRoutes.patch('/:reservationId', [
  */
 reservationsRoutes.get('/:reservationId', [
   param('reservationId').isString().notEmpty().withMessage('Reservation ID is required'),
-], validateRequest, async (req, res) => {
+], validateRequest, async (req: Request, res: Response) => {
   try {
     const { reservationId } = req.params;
 
@@ -274,22 +274,23 @@ reservationsRoutes.get('/:reservationId', [
     const reservationDoc = await firestore.collection('reservations').doc(reservationId).get();
 
     if (!reservationDoc.exists) {
-      throw new ApiError(404, 'Reservation not found');
+      throw new ApiError(404, 'Not Found', 'Reservation not found');
     }
 
+    const reservationData = reservationDoc.data();
     const reservation = {
       id: reservationDoc.id,
-      ...reservationDoc.data()
+      ...reservationData
     };
 
     // Enrich with event information
-    const eventDoc = await firestore.collection('events').doc(reservation.event_id).get();
+    const eventDoc = await firestore.collection('events').doc((reservationData as any)?.event_id).get();
     const eventData = eventDoc.exists ? eventDoc.data() : null;
 
     const enrichedReservation = {
       ...reservation,
       event: eventData ? {
-        id: reservation.event_id,
+        id: (reservationData as any)?.event_id,
         title: eventData.title,
         description: eventData.description,
         date: eventData.date,
@@ -309,7 +310,7 @@ reservationsRoutes.get('/:reservationId', [
       throw error;
     }
     
-    throw new ApiError(500, 'Failed to get reservation details');
+    throw new ApiError(500, 'Internal Server Error', 'Failed to get reservation details');
   }
 });
 
@@ -318,7 +319,7 @@ reservationsRoutes.get('/:reservationId', [
  */
 reservationsRoutes.delete('/:reservationId', [
   param('reservationId').isString().notEmpty().withMessage('Reservation ID is required'),
-], validateRequest, async (req, res) => {
+], validateRequest, async (req: Request, res: Response) => {
   try {
     const { reservationId } = req.params;
 
@@ -328,7 +329,7 @@ reservationsRoutes.delete('/:reservationId', [
     const reservationDoc = await reservationRef.get();
 
     if (!reservationDoc.exists) {
-      throw new ApiError(404, 'Reservation not found');
+      throw new ApiError(404, 'Not Found', 'Reservation not found');
     }
 
     const reservationData = reservationDoc.data();
@@ -337,7 +338,7 @@ reservationsRoutes.delete('/:reservationId', [
     if (reservationData?.event_id && reservationData?.user_id) {
       const eventRef = firestore.collection('events').doc(reservationData.event_id);
       await eventRef.update({
-        reservations: firestore.FieldValue.arrayRemove(reservationData.user_id),
+        reservations: FieldValue.arrayRemove(reservationData.user_id),
         updated_at: new Date().toISOString()
       });
     }
@@ -360,6 +361,6 @@ reservationsRoutes.delete('/:reservationId', [
       throw error;
     }
     
-    throw new ApiError(500, 'Failed to delete reservation');
+    throw new ApiError(500, 'Internal Server Error', 'Failed to delete reservation');
   }
 });

@@ -38,12 +38,12 @@ async function createOrRetrieveStripeAccount(email: string, userId: number): Pro
         console.log(`Email matches existing user. Updating current user ${userId} to use existing account ${accountId}`);
         await updateUser(userId, { 
           stripe_connect_id: accountId,
-          previous_stripe_connect_id: null
+          previous_stripe_connect_id: undefined
         });
         
         // Clear the account from the old user record to avoid conflicts
         await updateUser(existingUser.id, { 
-          stripe_connect_id: null,
+          stripe_connect_id: undefined,
           previous_stripe_connect_id: accountId
         });
       } else {
@@ -53,7 +53,7 @@ async function createOrRetrieveStripeAccount(email: string, userId: number): Pro
       // Update user with Stripe Connect account ID and clear any previous ID
       await updateUser(userId, { 
         stripe_connect_id: accountId,
-        previous_stripe_connect_id: null
+        previous_stripe_connect_id: undefined
       });
     }
     
@@ -122,7 +122,7 @@ connectRoutes.post('/onboard-link', requireAuth, validateSchema(connectOnboardSc
             // Reconnect the existing account and clear the previous_stripe_connect_id
             user = await updateUser(user.id, { 
               stripe_connect_id: stripeAccountId,
-              previous_stripe_connect_id: null
+              previous_stripe_connect_id: undefined
             });
             
             console.log(`Successfully reconnected existing Stripe Connect account: ${stripeAccountId}`);
@@ -170,7 +170,7 @@ connectRoutes.post('/onboard-link', requireAuth, validateSchema(connectOnboardSc
     }
 
     // Check if onboarding is already complete
-    const onboardingComplete = await isAccountOnboardingComplete(stripeAccountId);
+    const onboardingComplete = await isAccountOnboardingComplete(stripeAccountId!);
     
     if (onboardingComplete) {
       // Update user record if needed
@@ -192,7 +192,7 @@ connectRoutes.post('/onboard-link', requireAuth, validateSchema(connectOnboardSc
       const returnUrlWithAccount = `${return_url}?account_id=${stripeAccountId}`;
       
       const accountLink = await createAccountLink(
-        stripeAccountId,
+        stripeAccountId!,
         returnUrlWithAccount,
         refreshUrl
       );
@@ -476,10 +476,10 @@ connectRoutes.post('/disconnect', requireAuth, asyncHandler(async (req: AuthRequ
     // Update user record to remove Stripe Connect details but store the previous ID
     // Reset role back to 'buyer' (the default) since they're no longer a host
     const updateData = { 
-      stripe_connect_id: null,
+      stripe_connect_id: undefined,
       previous_stripe_connect_id: previousConnectId,
       connect_onboarding_complete: false,
-      role: 'buyer'
+      role: 'buyer' as const
     };
     
     console.log('Updating user with data:', updateData);
@@ -524,7 +524,7 @@ connectRoutes.post('/dashboard-link', requireAuth, asyncHandler(async (req: Auth
   }
     
   // Verify the account exists and onboarding is complete
-  const onboardingComplete = await isAccountOnboardingComplete(stripeAccountId);
+  const onboardingComplete = await isAccountOnboardingComplete(stripeAccountId!);
   
   if (!onboardingComplete) {
     throw new ApiError(400, 'Bad Request', 'Connect account onboarding is not complete');

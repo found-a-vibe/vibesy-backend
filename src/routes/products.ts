@@ -35,7 +35,7 @@ productsRoutes.post('/products', async (req: Request, res: Response) => {
 
     console.log(`Successfully created Stripe product: ${product.id}`);
 
-    res.status(201).json({
+    return res.status(201).json({
       id: product.id,
       name: product.name,
       description: product.description,
@@ -97,7 +97,7 @@ productsRoutes.post('/prices', async (req: Request, res: Response) => {
 
     console.log(`Successfully created Stripe price: ${price.id}`);
 
-    res.status(201).json({
+    return res.status(201).json({
       id: price.id,
       product: price.product,
       unit_amount: price.unit_amount,
@@ -156,7 +156,7 @@ productsRoutes.get('/products/:productId/prices', async (req: Request, res: Resp
       created: price.created
     }));
 
-    res.json({
+    return res.json({
       success: true,
       data: formattedPrices,
       has_more: prices.has_more
@@ -198,7 +198,7 @@ productsRoutes.get('/products/:productId', async (req: Request, res: Response) =
 
     console.log(`Successfully retrieved Stripe product: ${product.id}`);
 
-    res.json({
+    return res.json({
       success: true,
       product: {
         id: product.id,

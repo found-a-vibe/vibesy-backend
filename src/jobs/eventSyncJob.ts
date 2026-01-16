@@ -1,4 +1,4 @@
-import cron from 'node-cron';
+import cron, { ScheduledTask } from 'node-cron';
 import moment from 'moment-timezone';
 import { eventsService } from '../services/eventsService';
 import { createLogEntry } from '../middleware/logger';
@@ -21,7 +21,7 @@ class EventSyncJob {
   };
 
   private isRunning = false;
-  private task: cron.ScheduledTask | null = null;
+  private task: ScheduledTask | null = null;
   private readonly timezone = 'America/New_York';
   private readonly cronExpression = '0 0 * * *'; // Run daily at midnight EST
 
@@ -42,7 +42,6 @@ class EventSyncJob {
       this.task = cron.schedule(this.cronExpression, () => {
         this.runSync();
       }, {
-        scheduled: true,
         timezone: this.timezone
       });
 

@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { stripe } from '../stripe';
 import { firestore } from '../database';
@@ -17,7 +17,7 @@ paymentIntentsRoutes.post('/payment-intents', [
   body('quantity').isInt({ min: 1, max: 10 }).withMessage('Quantity must be between 1 and 10'),
   body('user_email').isEmail().withMessage('Valid email address is required'),
   body('connected_account_id').isString().notEmpty().withMessage('Connected account ID is required'),
-], validateRequest, async (req, res) => {
+], validateRequest, async (req: Request, res: Response) => {
   try {
     const { event_id, price_id, quantity, user_email, connected_account_id } = req.body;
 
@@ -32,12 +32,12 @@ paymentIntentsRoutes.post('/payment-intents', [
     // 1. Verify the event exists and belongs to the connected account
     const eventDoc = await firestore.collection('events').doc(event_id.toLowerCase()).get();
     if (!eventDoc.exists) {
-      throw new ApiError(404, 'Event not found');
+      throw new ApiError(404, 'Not Found', 'Event not found');
     }
 
     const eventData = eventDoc.data();
     if (eventData?.stripeConnectedAccountId !== connected_account_id) {
-      throw new ApiError(403, 'Connected account mismatch for this event');
+      throw new ApiError(403, 'Forbidden', 'Connected account mismatch for this event');
     }
 
     // 2. Retrieve the Stripe price to get amount information
@@ -46,7 +46,7 @@ paymentIntentsRoutes.post('/payment-intents', [
     });
 
     if (!price.active) {
-      throw new ApiError(400, 'Price is no longer available');
+      throw new ApiError(400, 'Bad Request', 'Price is no longer available');
     }
 
     // 3. Calculate total amount
@@ -78,7 +78,7 @@ paymentIntentsRoutes.post('/payment-intents', [
       }
     } catch (error) {
       console.error('Error managing customer:', error);
-      throw new ApiError(500, 'Failed to set up customer account');
+      throw new ApiError(500, 'Internal Server Error', 'Failed to set up customer account');
     }
 
     // 5. Create payment intent on platform account with transfer to connected account
@@ -127,14 +127,14 @@ paymentIntentsRoutes.post('/payment-intents', [
     }
     
     if (error.type === 'StripeCardError') {
-      throw new ApiError(400, `Payment error: ${error.message}`);
+      throw new ApiError(400, 'Payment Error', `Payment error: ${error.message}`);
     }
     
     if (error.type === 'StripeInvalidRequestError') {
-      throw new ApiError(400, `Invalid request: ${error.message}`);
+      throw new ApiError(400, 'Invalid Request', `Invalid request: ${error.message}`);
     }
     
-    throw new ApiError(500, 'Failed to create payment intent');
+    throw new ApiError(500, 'Internal Server Error', 'Failed to create payment intent');
   }
 });
 
@@ -144,7 +144,7 @@ paymentIntentsRoutes.post('/payment-intents', [
  */
 paymentIntentsRoutes.post('/payment-intents/:id/confirm', [
   body('user_email').isEmail().withMessage('Valid email address is required'),
-], validateRequest, async (req, res) => {
+], validateRequest, async (req: Request, res: Response) => {
   try {
     const { id: paymentIntentId } = req.params;
     const { user_email } = req.body;
@@ -155,7 +155,7 @@ paymentIntentsRoutes.post('/payment-intents/:id/confirm', [
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
     
     if (paymentIntent.status !== 'succeeded') {
-      throw new ApiError(400, 'Payment intent has not succeeded');
+      throw new ApiError(400, 'Bad Request', 'Payment intent has not succeeded');
     }
 
     const { event_id, price_id, quantity } = paymentIntent.metadata;
@@ -194,7 +194,7 @@ paymentIntentsRoutes.post('/payment-intents/:id/confirm', [
       throw error;
     }
     
-    throw new ApiError(500, 'Failed to confirm payment');
+    throw new ApiError(500, 'Internal Server Error', 'Failed to confirm payment');
   }
 });
 
@@ -207,7 +207,7 @@ paymentIntentsRoutes.get('/payment-intents/:id', async (req, res) => {
     const { connected_account_id } = req.query;
 
     if (!connected_account_id || typeof connected_account_id !== 'string') {
-      throw new ApiError(400, 'Connected account ID is required');
+      throw new ApiError(400, 'Bad Request', 'Connected account ID is required');
     }
 
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
@@ -230,9 +230,9 @@ paymentIntentsRoutes.get('/payment-intents/:id', async (req, res) => {
     }
     
     if (error.type === 'StripeInvalidRequestError') {
-      throw new ApiError(404, 'Payment intent not found');
+      throw new ApiError(404, 'Not Found', 'Payment intent not found');
     }
     
-    throw new ApiError(500, 'Failed to retrieve payment intent');
+    throw new ApiError(500, 'Internal Server Error', 'Failed to retrieve payment intent');
   }
 });
