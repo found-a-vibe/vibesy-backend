@@ -4,6 +4,7 @@ import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { adminService } from './services/adminService';
 import redisRepository from './repositories/redisRepository';
+import { log } from './utils/logger';
 
 // Export Firebase Firestore instance
 export const firestore = adminService.firestore();
@@ -39,7 +40,7 @@ class PostgreSQLConnection implements DatabaseConnection {
 
     // Handle pool errors
     this.pool.on('error', (err) => {
-      console.error('Unexpected error on idle client', err);
+      log.error('Unexpected error on idle PostgreSQL client', err);
     });
   }
 
@@ -68,14 +69,14 @@ export async function initializeDatabase(): Promise<DatabaseConnection> {
     return dbConnection;
   }
 
-  console.log(`Connecting to PostgreSQL database...`);
+  log.info('Connecting to PostgreSQL database...');
   
   dbConnection = new PostgreSQLConnection();
   
   try {
     // Test the connection
     await dbConnection.query('SELECT NOW()');
-    console.log('Database connection established successfully');
+    log.info('Database connection established successfully');
 
     // Initialize schema
     const schemaPath = join(__dirname, '../schema.sql');
@@ -83,14 +84,14 @@ export async function initializeDatabase(): Promise<DatabaseConnection> {
     
     // Execute the schema (PostgreSQL can handle multiple statements)
     await dbConnection.query(schema);
-    console.log('Database schema initialized successfully');
+    log.info('Database schema initialized successfully');
     
     // Run migrations
     await runMigrations(dbConnection);
-    console.log('Database migrations completed successfully');
+    log.info('Database migrations completed successfully');
 
   } catch (err) {
-    console.error('Error connecting to database:', err);
+    log.error('Error connecting to database', err instanceof Error ? err : undefined);
     throw err;
   }
 
@@ -140,16 +141,16 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
         .sort(); // Run migrations in alphabetical order
     } catch (err) {
       // Migrations directory doesn't exist or is empty
-      console.log('No migrations directory found or no migration files');
+      log.info('No migrations directory found or no migration files');
       return;
     }
     
     if (migrationFiles.length === 0) {
-      console.log('No migration files found');
+      log.info('No migration files found');
       return;
     }
     
-    console.log(`Found ${migrationFiles.length} migration file(s)`);
+    log.info('Found migration files', { count: migrationFiles.length });
     
     let executedCount = 0;
     let skippedCount = 0;
@@ -157,7 +158,7 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
     for (const file of migrationFiles) {
       // Check if migration has already been executed
       if (await isMigrationExecuted(db, file)) {
-        console.log(`Skipping migration (already executed): ${file}`);
+        log.debug('Skipping migration (already executed)', { file });
         skippedCount++;
         continue;
       }
@@ -165,21 +166,21 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
       const migrationPath = join(migrationsPath, file);
       const migration = readFileSync(migrationPath, 'utf8');
       
-      console.log(`Running migration: ${file}`);
+      log.info('Running migration', { file });
       
       try {
         await db.query(migration);
         await markMigrationExecuted(db, file);
-        console.log(`Completed migration: ${file}`);
+        log.info('Completed migration', { file });
         executedCount++;
       } catch (error) {
-        console.error(`Failed to execute migration ${file}:`, error);
+        log.error('Failed to execute migration', error instanceof Error ? error : undefined, { file });
         
         // For constraint/index conflicts, mark as executed and continue
         if (error instanceof Error && 
             (error.message.includes('already exists') || 
              error.message.includes('duplicate'))) {
-          console.log(`Marking migration as completed despite conflict: ${file}`);
+          log.warn('Marking migration as completed despite conflict', { file });
           await markMigrationExecuted(db, file);
           skippedCount++;
         } else {
@@ -188,10 +189,10 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
       }
     }
     
-    console.log(`Migration summary: ${executedCount} executed, ${skippedCount} skipped`);
+    log.info('Migration summary', { executed: executedCount, skipped: skippedCount });
     
   } catch (err) {
-    console.error('Error running migrations:', err);
+    log.error('Error running migrations', err instanceof Error ? err : undefined);
     throw err;
   }
 }
@@ -208,25 +209,25 @@ export function getDatabase(): DatabaseConnection {
  * Should be called during graceful shutdown
  */
 export async function closeDatabase(): Promise<void> {
-  console.log('Closing database connections...');
+  log.info('Closing database connections...');
   
   try {
     // Close PostgreSQL connection pool
     if (dbConnection) {
       await dbConnection.close();
-      console.log('PostgreSQL connection closed');
+      log.info('PostgreSQL connection closed');
       dbConnection = null;
     }
   } catch (error) {
-    console.error('Error closing PostgreSQL connection:', error);
+    log.error('Error closing PostgreSQL connection', error instanceof Error ? error : undefined);
   }
   
   try {
     // Close Redis connection
     await redisRepository.disconnect();
-    console.log('Redis connection closed');
+    log.info('Redis connection closed');
   } catch (error) {
-    console.error('Error closing Redis connection:', error);
+    log.error('Error closing Redis connection', error instanceof Error ? error : undefined);
   }
 }
 

@@ -1,3 +1,5 @@
+import { log } from './logger';
+
 /**
  * Validates required environment variables on startup
  * Throws an error if any required variables are missing or invalid
@@ -135,20 +137,17 @@ export const validateEnv = (): void => {
 
   // Throw error if any validation failed
   if (errors.length > 0) {
-    console.error('❌ Environment variable validation failed:\n');
-    errors.forEach(error => console.error(`  - ${error}`));
-    console.error('\nPlease check your .env file and ensure all required variables are set correctly.\n');
+    log.fatal('Environment variable validation failed', undefined, { errors });
+    errors.forEach(error => log.error(error));
     throw new Error('Environment variable validation failed');
   }
 
   // Display warnings
   if (warnings.length > 0) {
-    console.warn('⚠️  Environment variable warnings:\n');
-    warnings.forEach(warning => console.warn(`  - ${warning}`));
-    console.warn('');
+    log.warn('Environment variable warnings', { warnings });
   }
 
-  console.log('✅ Environment variables validated successfully');
+  log.info('Environment variables validated successfully');
 };
 
 // Validation helper functions

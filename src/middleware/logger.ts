@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import { createRequestLogger } from '../utils/logger';
 
 interface LogContext {
   requestId: string;
@@ -16,6 +17,7 @@ interface ExtendedRequest extends Request {
   startTime?: number;
   userId?: string;
   uid?: string;
+  log?: ReturnType<typeof createRequestLogger>;
 }
 
 /**
@@ -33,6 +35,9 @@ export const logRequest = (req: ExtendedRequest, res: Response, next: NextFuncti
              req.socket?.remoteAddress || 
              'unknown';
 
+  // Create request-scoped logger with correlation ID
+  req.log = createRequestLogger(requestId, req.method, req.url);
+
   const logContext: LogContext = {
     requestId,
     method: req.method,
@@ -44,7 +49,10 @@ export const logRequest = (req: ExtendedRequest, res: Response, next: NextFuncti
   };
 
   // Log request start
-  console.log(`[${logContext.timestamp}] ${logContext.method} ${logContext.url} - Request ID: ${requestId}`);
+  req.log.info({
+    ip: logContext.ip,
+    userAgent: logContext.userAgent,
+  }, 'Request started');
 
   // Log request completion
   res.on('finish', () => {
@@ -52,27 +60,28 @@ export const logRequest = (req: ExtendedRequest, res: Response, next: NextFuncti
     const {statusCode} = res;
     const contentLength = res.get('content-length') || 0;
 
-    console.log(
-      `[${new Date().toISOString()}] ${logContext.method} ${logContext.url} - ` +
-      `${statusCode} ${res.statusMessage} - ${duration}ms - ${contentLength} bytes - ` +
-      `Request ID: ${requestId}`
-    );
+    const responseContext = {
+      statusCode,
+      duration,
+      contentLength: parseInt(contentLength.toString()) || 0,
+      ip: logContext.ip,
+    };
 
-    // Log errors (4xx and 5xx status codes)
-    if (statusCode >= 400) {
-      console.error(
-        `[ERROR] Request ${requestId} failed with status ${statusCode} - ` +
-        `${logContext.method} ${logContext.url} - IP: ${logContext.ip} - ` +
-        `Duration: ${duration}ms`
-      );
+    // Log based on status code
+    if (statusCode >= 500) {
+      req.log!.error(responseContext, 'Request failed (server error)');
+    } else if (statusCode >= 400) {
+      req.log!.warn(responseContext, 'Request failed (client error)');
+    } else {
+      req.log!.info(responseContext, 'Request completed');
     }
 
     // Log slow requests (> 5 seconds)
     if (duration > 5000) {
-      console.warn(
-        `[SLOW REQUEST] Request ${requestId} took ${duration}ms - ` +
-        `${logContext.method} ${logContext.url}`
-      );
+      req.log!.warn({
+        duration,
+        threshold: 5000,
+      }, 'Slow request detected');
     }
   });
 
@@ -84,9 +93,12 @@ export const logRequest = (req: ExtendedRequest, res: Response, next: NextFuncti
 
 /**
  * Legacy compatibility middleware - simple time logging
+ * @deprecated Use logRequest instead
  */
-export const logTime = (req: Request, res: Response, next: NextFunction): void => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} - Started`);
+export const logTime = (req: ExtendedRequest, res: Response, next: NextFunction): void => {
+  if (req.log) {
+    req.log.debug('Request started');
+  }
   next();
 };
 
@@ -94,22 +106,23 @@ export const logTime = (req: Request, res: Response, next: NextFunction): void =
  * Middleware to log API endpoint access
  */
 export const logApiAccess = (req: ExtendedRequest, res: Response, next: NextFunction): void => {
-  const timestamp = new Date().toISOString();
-  const {method} = req;
   const url = req.originalUrl || req.url;
   const ip = req.ip || req.socket?.remoteAddress;
   const userAgent = req.headers['user-agent'];
 
+  // Use request logger if available, otherwise create one
+  const reqLogger = req.log || createRequestLogger(req.requestId || 'unknown', req.method, url);
+
   // Log API access
-  console.log(
-    `[API ACCESS] ${timestamp} - ${method} ${url} - ` +
-    `IP: ${ip} - User-Agent: ${userAgent?.substring(0, 100)}...`
-  );
+  reqLogger.info({
+    ip,
+    userAgent: userAgent?.substring(0, 100),
+  }, 'API endpoint accessed');
 
   // Log request body for debugging (exclude sensitive data)
   if (process.env.NODE_ENV === 'development' && req.body) {
     const sanitizedBody = sanitizeRequestBody(req.body);
-    console.log(`[REQUEST BODY] ${JSON.stringify(sanitizedBody, null, 2)}`);
+    reqLogger.debug({ body: sanitizedBody }, 'Request body');
   }
 
   next();
@@ -124,21 +137,26 @@ export const logError = (
   res: Response, 
   next: NextFunction
 ): void => {
-  const timestamp = new Date().toISOString();
   const requestId = req.requestId || 'unknown';
-  const {method} = req;
   const url = req.originalUrl || req.url;
   const ip = req.ip || req.socket?.remoteAddress;
 
-  console.error(
-    `[ERROR] ${timestamp} - Request ID: ${requestId} - ` +
-    `${method} ${url} - IP: ${ip} - ` +
-    `Error: ${error.message || error}`
-  );
+  // Use request logger if available, otherwise create one
+  const reqLogger = req.log || createRequestLogger(requestId, req.method, url);
 
-  // Log stack trace in development
-  if (process.env.NODE_ENV === 'development' && error.stack) {
-    console.error(`[ERROR STACK] ${error.stack}`);
+  // Log error with full context
+  if (error instanceof Error) {
+    reqLogger.error({
+      err: error,
+      ip,
+      statusCode: (error as any).statusCode,
+    }, 'Request error');
+  } else {
+    reqLogger.error({
+      ip,
+      error: String(error),
+      statusCode: error?.statusCode,
+    }, 'Request error');
   }
 
   next(error);
@@ -148,16 +166,17 @@ export const logError = (
  * Middleware to log authentication events
  */
 export const logAuth = (req: ExtendedRequest, res: Response, next: NextFunction): void => {
-  const timestamp = new Date().toISOString();
-  const {method} = req;
   const url = req.originalUrl || req.url;
   const ip = req.ip || req.socket?.remoteAddress;
   const userId = req.userId || req.uid || 'anonymous';
 
-  console.log(
-    `[AUTH] ${timestamp} - ${method} ${url} - ` +
-    `User ID: ${userId} - IP: ${ip}`
-  );
+  // Use request logger if available, otherwise create one
+  const reqLogger = req.log || createRequestLogger(req.requestId || 'unknown', req.method, url);
+
+  reqLogger.info({
+    userId,
+    ip,
+  }, 'Authentication event');
 
   next();
 };
@@ -200,25 +219,13 @@ function sanitizeRequestBody(body: any): any {
 
 /**
  * Create a structured log entry
+ * @deprecated Use the logger from utils/logger.ts directly
  */
 export const createLogEntry = (
   level: 'info' | 'warn' | 'error',
   message: string,
   context?: Record<string, any>
 ): void => {
-  const timestamp = new Date().toISOString();
-  const logEntry = {
-    timestamp,
-    level: level.toUpperCase(),
-    message,
-    ...context
-  };
-
-  const logMessage = `[${logEntry.level}] ${timestamp} - ${message}`;
-  
-  if (context && Object.keys(context).length > 0) {
-    console.log(`${logMessage} - Context: ${JSON.stringify(context)}`);
-  } else {
-    console.log(logMessage);
-  }
+  const { logger } = require('../utils/logger');
+  logger[level](context, message);
 };

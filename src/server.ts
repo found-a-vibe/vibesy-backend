@@ -1,8 +1,9 @@
 import express from 'express';
-import cors from 'cors';
 import helmet from 'helmet';
+import cors from 'cors';
 import { config } from 'dotenv';
 import { initializeDatabase, closeDatabase, getDatabase } from './database';
+import { logger, log } from './utils/logger';
 import { logRequest, logError } from './middleware/logger';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requireAuth, requireAdmin, AuthRequest } from './middleware/auth';
@@ -224,36 +225,39 @@ app.use('*', notFoundHandler);
 // Initialize database and start server
 async function startServer() {
   try {
-    console.log('🔧 Initializing database...');
+    log.info('Initializing database...');
     await initializeDatabase();
-    console.log('✅ Database initialized successfully');
+    log.info('Database initialized successfully');
     
-    console.log('🔧 Starting job scheduler...');
+    log.info('Starting job scheduler...');
     jobScheduler.startAll();
-    console.log('✅ Job scheduler started successfully');
+    log.info('Job scheduler started successfully');
     
     const server = app.listen(port, '0.0.0.0', () => {
-      console.log('🚀 Vibesy API server running on port', port);
-      console.log('📍 Health check:', `http://localhost:${port}/health`);
-      console.log('🔗 Environment:', process.env.NODE_ENV || 'development');
-      console.log('📊 System jobs:', `http://localhost:${port}/system/jobs`);
+      log.info('Vibesy API server running', {
+        port,
+        healthCheck: `/health`,
+        readyCheck: `/ready`,
+        environment: process.env.NODE_ENV || 'development',
+        systemJobs: `/system/jobs`,
+      });
     });
 
     // Graceful shutdown
     const gracefulShutdown = async () => {
-      console.log('📄 Starting graceful shutdown...');
+      log.info('Starting graceful shutdown...');
       
       server.close(() => {
-        console.log('🔌 HTTP server closed');
+        log.info('HTTP server closed');
       });
       
       await jobScheduler.shutdown();
-      console.log('🛑 Background jobs stopped');
+      log.info('Background jobs stopped');
       
       await closeDatabase();
-      console.log('🗄️  Database connections closed');
+      log.info('Database connections closed');
       
-      console.log('✅ Graceful shutdown complete');
+      log.info('Graceful shutdown complete');
       process.exit(0);
     };
 
@@ -261,7 +265,9 @@ async function startServer() {
     process.on('SIGINT', gracefulShutdown);
     
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    log.fatal('Failed to start server', error instanceof Error ? error : undefined, {
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
     process.exit(1);
   }
 }

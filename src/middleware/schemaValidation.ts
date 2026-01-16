@@ -274,3 +274,36 @@ export const paginationSchema = Joi.object({
       'number.min': 'Offset cannot be negative'
     })
 });
+
+/**
+ * Ticket Token Query Schema (for GET /tickets/verify)
+ */
+export const ticketTokenQuerySchema = Joi.object({
+  token: Joi.string().min(10).trim().required()
+    .messages({
+      'string.min': 'Invalid ticket token',
+      'any.required': 'Ticket token is required'
+    })
+});
+
+/**
+ * Ticket Token Param Schema (for GET /tickets/qr/:token)
+ */
+export const ticketTokenParamSchema = Joi.object({
+  token: Joi.string().min(10).trim().required()
+    .messages({
+      'string.min': 'Invalid ticket token',
+      'any.required': 'Ticket token is required'
+    })
+});
+
+/**
+ * QR Size Query Schema
+ */
+export const qrSizeQuerySchema = Joi.object({
+  size: Joi.number().integer().min(100).max(1000).default(200)
+    .messages({
+      'number.min': 'QR code size must be at least 100',
+      'number.max': 'QR code size cannot exceed 1000'
+    })
+});

@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import { ApiError } from '../utils/errors';
+import { log } from '../utils/logger';
 
 class RedisRepository {
   private client: Redis | null = null;
@@ -47,32 +48,32 @@ class RedisRepository {
 
       // Event listeners for connection management
       redis.on('connect', () => {
-        console.log('Redis client connected successfully');
+        log.info('Redis client connected successfully');
       });
 
       redis.on('ready', () => {
-        console.log('Redis client ready to receive commands');
+        log.info('Redis client ready to receive commands');
       });
 
       redis.on('error', (error) => {
-        console.error('Redis connection error:', error);
+        log.error('Redis connection error', error);
       });
 
       redis.on('close', () => {
-        console.log('Redis connection closed');
+        log.info('Redis connection closed');
       });
 
       redis.on('reconnecting', (delay: number) => {
-        console.log(`Redis reconnecting in ${delay}ms`);
+        log.info('Redis reconnecting', { delayMs: delay });
       });
 
       // Connect to Redis
       await redis.connect();
       
-      console.log('Redis repository initialized successfully');
+      log.info('Redis repository initialized successfully');
       return redis;
     } catch (error) {
-      console.error('Failed to connect to Redis:', error);
+      log.error('Failed to connect to Redis', error instanceof Error ? error : undefined);
       throw new ApiError(500, 'Database Connection Error', 'Failed to connect to Redis');
     }
   }
@@ -83,7 +84,7 @@ class RedisRepository {
     try {
       return await client.get(key);
     } catch (error) {
-      console.error(`Redis GET error for key ${key}:`, error);
+      log.error('Redis GET error', error instanceof Error ? error : undefined, { key });
       throw new ApiError(500, 'Database Error', 'Failed to get value from Redis');
     }
   }
@@ -245,9 +246,9 @@ class RedisRepository {
     if (this.client) {
       try {
         await this.client.quit();
-        console.log('Redis client disconnected successfully');
+        log.info('Redis client disconnected successfully');
       } catch (error) {
-        console.error('Error disconnecting Redis client:', error);
+        log.error('Error disconnecting Redis client', error instanceof Error ? error : undefined);
       } finally {
         this.client = null;
         this.connectionPromise = null;

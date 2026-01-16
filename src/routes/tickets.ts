@@ -7,9 +7,9 @@ import {
   findEventById,
   findUserByEmail
 } from '../database';
-import { stripe, isStripeError, handleStripeError } from '../stripe';
+import { stripe } from '../stripe';
 import { requireAuth, AuthRequest, requireEventAccess } from '../middleware/auth';
-import { validateSchema, ticketScanSchema } from '../middleware/schemaValidation';
+import { validateSchema, ticketScanSchema, ticketTokenQuerySchema, ticketTokenParamSchema, qrSizeQuerySchema } from '../middleware/schemaValidation';
 import { ApiError } from '../utils/errors';
 import { asyncHandler } from '../utils/asyncHandler';
 
@@ -17,101 +17,86 @@ export const ticketRoutes: ReturnType<typeof Router> = Router();
 
 // GET /tickets/verify?token=...
 // Verify a ticket QR code
-ticketRoutes.get('/verify', async (req: Request, res: Response) => {
-  try {
-    const { token } = req.query;
+ticketRoutes.get('/verify', validateSchema(ticketTokenQuerySchema, 'query'), asyncHandler(async (req: Request, res: Response) => {
+  const { token } = req.query as { token: string };
 
-    if (!token || typeof token !== 'string') {
-      return res.status(400).json({ 
-        error: { message: 'QR token is required' } 
-      });
-    }
+  console.log(`🔍 Verifying ticket with token: ${token.substring(0, 8)}...`);
 
-    console.log(`🔍 Verifying ticket with token: ${token.substring(0, 8)}...`);
+  // Find ticket by QR token
+  const ticketWithEvent = await findTicketByQRToken(token);
 
-    // Find ticket by QR token
-    const ticketWithEvent = await findTicketByQRToken(token);
+  if (!ticketWithEvent) {
+    return res.status(404).json({
+      valid: false,
+      error: { message: 'Ticket not found' },
+      details: 'Invalid QR code'
+    });
+  }
 
-    if (!ticketWithEvent) {
-      return res.status(404).json({
-        valid: false,
-        error: { message: 'Ticket not found' },
-        details: 'Invalid QR code'
-      });
-    }
-
-    const currentTime = new Date();
-    const eventStartTime = new Date(ticketWithEvent.event.starts_at);
-    
-    // Check if ticket is valid
-    if (ticketWithEvent.status === 'used') {
-      return res.json({
-        valid: false,
-        used: true,
-        error: { message: 'Ticket already used' },
-        ticket: {
-          id: ticketWithEvent.id,
-          ticket_number: ticketWithEvent.ticket_number,
-          status: ticketWithEvent.status,
-          scanned_at: ticketWithEvent.scanned_at,
-          holder_name: ticketWithEvent.holder_name
-        },
-        event: {
-          title: ticketWithEvent.event.title,
-          venue: ticketWithEvent.event.venue,
-          starts_at: ticketWithEvent.event.starts_at
-        }
-      });
-    }
-
-    if (ticketWithEvent.status === 'cancelled' || ticketWithEvent.status === 'refunded') {
-      return res.json({
-        valid: false,
-        error: { message: `Ticket ${ticketWithEvent.status}` },
-        ticket: {
-          id: ticketWithEvent.id,
-          ticket_number: ticketWithEvent.ticket_number,
-          status: ticketWithEvent.status
-        }
-      });
-    }
-
-    // Check if event has started (allow entry up to 30 minutes after start)
-    const thirtyMinutesAfterStart = new Date(eventStartTime.getTime() + 30 * 60000);
-    const isEventAccessible = currentTime >= new Date(eventStartTime.getTime() - 60 * 60000) && // 1 hour before
-                              currentTime <= thirtyMinutesAfterStart; // 30 minutes after
-
+  const currentTime = new Date();
+  const eventStartTime = new Date(ticketWithEvent.event.starts_at);
+  
+  // Check if ticket is valid
+  if (ticketWithEvent.status === 'used') {
     return res.json({
-      valid: true,
-      event_accessible: isEventAccessible,
+      valid: false,
+      used: true,
+      error: { message: 'Ticket already used' },
       ticket: {
         id: ticketWithEvent.id,
         ticket_number: ticketWithEvent.ticket_number,
         status: ticketWithEvent.status,
-        holder_name: ticketWithEvent.holder_name,
-        holder_email: ticketWithEvent.holder_email
+        scanned_at: ticketWithEvent.scanned_at,
+        holder_name: ticketWithEvent.holder_name
       },
       event: {
-        id: ticketWithEvent.event.id,
         title: ticketWithEvent.event.title,
         venue: ticketWithEvent.event.venue,
         starts_at: ticketWithEvent.event.starts_at
-      },
-      access_window: {
-        opens_at: new Date(eventStartTime.getTime() - 60 * 60000).toISOString(),
-        closes_at: thirtyMinutesAfterStart.toISOString(),
-        current_time: currentTime.toISOString()
       }
     });
+  }
 
-  } catch (error) {
-    console.error('Ticket verification error:', error);
-    return res.status(500).json({ 
+  if (ticketWithEvent.status === 'cancelled' || ticketWithEvent.status === 'refunded') {
+    return res.json({
       valid: false,
-      error: { message: 'Internal server error' } 
+      error: { message: `Ticket ${ticketWithEvent.status}` },
+      ticket: {
+        id: ticketWithEvent.id,
+        ticket_number: ticketWithEvent.ticket_number,
+        status: ticketWithEvent.status
+      }
     });
   }
-});
+
+  // Check if event has started (allow entry up to 30 minutes after start)
+  const thirtyMinutesAfterStart = new Date(eventStartTime.getTime() + 30 * 60000);
+  const isEventAccessible = currentTime >= new Date(eventStartTime.getTime() - 60 * 60000) && // 1 hour before
+                            currentTime <= thirtyMinutesAfterStart; // 30 minutes after
+
+  return res.json({
+    valid: true,
+    event_accessible: isEventAccessible,
+    ticket: {
+      id: ticketWithEvent.id,
+      ticket_number: ticketWithEvent.ticket_number,
+      status: ticketWithEvent.status,
+      holder_name: ticketWithEvent.holder_name,
+      holder_email: ticketWithEvent.holder_email
+    },
+    event: {
+      id: ticketWithEvent.event.id,
+      title: ticketWithEvent.event.title,
+      venue: ticketWithEvent.event.venue,
+      starts_at: ticketWithEvent.event.starts_at
+    },
+    access_window: {
+      opens_at: new Date(eventStartTime.getTime() - 60 * 60000).toISOString(),
+      closes_at: thirtyMinutesAfterStart.toISOString(),
+      current_time: currentTime.toISOString()
+    }
+  });
+}));
 
 // POST /tickets/scan
 // Mark a ticket as used (for event staff)
@@ -189,20 +174,22 @@ ticketRoutes.post('/scan', requireAuth, validateSchema(ticketScanSchema), asyncH
 
 // GET /tickets/qr/:token
 // Generate QR code image for a ticket
-ticketRoutes.get('/qr/:token', async (req: Request, res: Response) => {
-  try {
+ticketRoutes.get('/qr/:token', 
+  validateSchema(ticketTokenParamSchema, 'params'),
+  validateSchema(qrSizeQuerySchema, 'query'),
+  asyncHandler(async (req: Request, res: Response) => {
     const { token } = req.params;
-    const { size = '200' } = req.query;
+    const { size = 200 } = req.query as { size?: number };
 
     // Validate ticket exists
     const ticket = await findTicketByQRToken(token);
     if (!ticket) {
-      return res.status(404).json({ error: { message: 'Ticket not found' } });
+      throw new ApiError(404, 'Not Found', 'Ticket not found');
     }
 
     // Generate QR code
     const qrCodeDataURL = await QRCode.toDataURL(token, {
-      width: parseInt(size as string),
+      width: size,
       margin: 2,
       color: {
         dark: '#000000',
@@ -216,14 +203,7 @@ ticketRoutes.get('/qr/:token', async (req: Request, res: Response) => {
       qr_code: qrCodeDataURL,
       ticket_number: ticket.ticket_number
     });
-
-  } catch (error) {
-    console.error('QR code generation error:', error);
-    res.status(500).json({ 
-      error: { message: 'Failed to generate QR code' } 
-    });
-  }
-});
+  }));
 
 // GET /tickets/qr/:ticket_id/invoice
 // Get QR code data with invoice information for a ticket
